@@ -61,7 +61,7 @@ FILEGUARD_DIR=/workspace/fileguard bash "$SRC/install.sh"
 
 ### What the bot says to the user
 
-- **First install only:** one line `⚙️ 正在初始化 FileGuard，预计约 N 分钟` (from `--estimate`), then a silent left-pad verification scan, then `✅ 初始化完成，可以开始检测了`. On failure, one short line that scanning is not available. Never list components.
+- **First install only:** one line `⚙️ 正在初始化 FileGuard，预计约 N 分钟` (from `--estimate`), then a silent left-pad verification scan, then `✅ 初始化完成，可以开始检测了`. 
 
 ## Using `fg`
 
