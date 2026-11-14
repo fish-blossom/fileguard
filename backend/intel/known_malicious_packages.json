@@ -1,0 +1,79 @@
+{
+  "_comment": "Local offline list of known malicious package versions ('*' = all versions). OSV.dev MAL-* advisories are queried online in addition.",
+  "npm": {
+    "flatmap-stream": [
+      "*"
+    ],
+    "event-stream": [
+      "3.3.6"
+    ],
+    "ua-parser-js": [
+      "0.7.29",
+      "0.8.0",
+      "1.0.0"
+    ],
+    "coa": [
+      "2.0.3",
+      "2.0.4",
+      "2.1.1",
+      "2.1.3",
+      "3.0.1",
+      "3.1.3"
+    ],
+    "rc": [
+      "1.2.9",
+      "1.3.9",
+      "2.3.9"
+    ],
+    "node-ipc": [
+      "10.1.1",
+      "10.1.2"
+    ],
+    "crossenv": [
+      "*"
+    ],
+    "eslint-scope": [
+      "3.7.2"
+    ],
+    "getcookies": [
+      "*"
+    ],
+    "electorn": [
+      "*"
+    ],
+    "discord.dll": [
+      "*"
+    ],
+    "plain-crypto-js": [
+      "4.2.1"
+    ],
+    "axios": [
+      "1.14.1",
+      "0.30.4"
+    ]
+  },
+  "pypi": {
+    "ctx": [
+      "0.2.2",
+      "0.2.6"
+    ],
+    "colourama": [
+      "*"
+    ],
+    "jeIlyfish": [
+      "*"
+    ],
+    "python3-dateutil": [
+      "*"
+    ],
+    "acqusition": [
+      "*"
+    ],
+    "requesys": [
+      "*"
+    ]
+  },
+  "_sources": {
+    "axios-2026-03-31": "Axios npm compromise 2026-03-31: axios@1.14.1/0.30.4 added plain-crypto-js@^4.2.1 whose postinstall (setup.js) drops a RAT from sfrclak[.]com:8000"
+  }
+}

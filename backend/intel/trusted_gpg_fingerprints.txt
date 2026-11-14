@@ -1,0 +1,2 @@
+# Pinned official GPG signing-key fingerprints (40 hex, one per line). A valid signature by a key listed here
+# is reported as "verified"; any other valid signature is "verified_untrusted" (cryptographically valid, signer not pinned).

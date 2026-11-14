@@ -1,0 +1,13 @@
+httpx==0.28.1
+node-semver==0.9.1
+oletools==0.60.2
+packaging==26.3
+pefile==2024.8.26
+py7zr==1.1.4
+python-magic==0.4.27
+rarfile==4.5
+yara-python==4.5.4
+cryptography==50.0.2
+pypi-attestations==0.0.31
+PyYAML==6.0.3
+sigstore==4.5.1

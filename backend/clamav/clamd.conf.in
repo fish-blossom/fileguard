@@ -1,0 +1,28 @@
+# FileGuard dedicated clamd (runs as the current user, local Unix socket).
+# @FILEGUARD_DIR@ is replaced by start_clamd.sh / install.sh.
+LocalSocket @FILEGUARD_DIR@/run/clamd.sock
+LocalSocketMode 660
+PidFile @FILEGUARD_DIR@/run/clamd.pid
+DatabaseDirectory /var/lib/clamav
+LogFile @FILEGUARD_DIR@/run/clamd.log
+LogTime yes
+Foreground no
+MaxThreads 4
+ReadTimeout 300
+CommandReadTimeout 30
+StreamMaxLength 520M
+MaxScanSize 1100M
+MaxFileSize 520M
+MaxRecursion 16
+MaxFiles 20000
+MaxScanTime 300000
+ScanArchive yes
+ScanOLE2 yes
+ScanPDF yes
+ScanPE yes
+ScanELF yes
+ScanHTML yes
+AlertEncrypted no
+AlertOLE2Macros no
+HeuristicAlerts yes
+AlertExceedsMax no
