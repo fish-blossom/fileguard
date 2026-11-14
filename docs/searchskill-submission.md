@@ -24,4 +24,4 @@ English:
 English: Upload a file, or send a download link or a package name and version. FileGuard first tells you roughly how long the scan will take, then runs a seven-stage check (S0 to S7) and updates you on long scans. The report includes the verdict, risk level, evidence, SHA-256, and how to verify it. Files can be up to 500 MB, archives are unpacked up to 5 levels deep, and files are only analyzed statically, then deleted after the scan, keeping just the report and hashes. NO_FINDINGS means no threat was found within the completed static checks; it does not guarantee a file is safe.
 
 ## 公共模板链接 / Public template link
-（待生成 / To be generated after the bot is created）
+https://x.ai/bot/hr6aT_S28hRFdOIu_IM3L
