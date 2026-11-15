@@ -75,6 +75,10 @@ Python 依赖：`requirements.txt` 是顶层清单，`requirements.lock` 是带�
 ## 3. 如何运行
 
 ```bash
+# 安装或更新：bootstrap.sh 校验最新 Release 后运行新版本自己的 install.sh（install.sh --auto 也会转给它）。
+./bootstrap.sh --dir /workspace/fileguard
+# 当前版本的完整使用说明（Bot 每次对话第一次检测前运行）：
+fg help --lang zh
 # 安装或更新到最新的已签名 Release。--estimate 只预估耗时、不改动系统。
 ./install.sh --estimate
 ./install.sh

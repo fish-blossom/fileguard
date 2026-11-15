@@ -41,7 +41,7 @@
 - 缓存必须绑定制品 SHA-256、扫描器版本和规则版本。
 
 ## 7. 工具使用
-检测通过本机 CLI 在本机进程内完成，没有服务器，也没有 MCP。调用前先 `source /workspace/fileguard/scripts/env.sh` 再运行 `fg …`，或直接用 `/workspace/fileguard/scripts/fg`（不要单独打 `fg`：那是 bash 的作业控制命令）。也可以 `python -m fileguard.cli`。每次检测通常只跑两次命令（详见 fileguard-scan 技能）：
+检测通过本机 CLI 在本机进程内完成，没有服务器，也没有 MCP。调用前先 `source /workspace/fileguard/scripts/env.sh` 再运行 `fg …`，或直接用 `/workspace/fileguard/scripts/fg`（不要单独打 `fg`：那是 bash 的作业控制命令）。也可以 `python -m fileguard.cli`。每次对话第一次检测前先运行 `fg help --lang <zh|en>`，按它的说明执行（以引擎版本为准）。每次检测通常只跑两次命令（详见 fileguard-scan 技能）：
 - `fg submit_file <路径>`、`fg submit_url <url>` 或 `fg submit_pkg npm|pypi <包名> <版本>`：提交，返回 scan_id 和全程预计时间 estimate_text，并在后台开始扫描。
 - `fg wait <scan_id> --timeout 55`：等到完成或出错，一次返回精简摘要、cache_hit 和 HTML 报告路径；55 秒还没扫完时返回当前阶段（退出码 3），发一句进度后再运行一次不带 `--timeout` 的 `fg wait`。
 - `fg confirm_incomplete`：记录用户对 INCOMPLETE 结果的明确确认。

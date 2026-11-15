@@ -18,10 +18,11 @@ fileguard/
 ├── SECURITY.md               How to report a vulnerability; how releases are signed
 ├── .github/workflows/        Tag-triggered release: sign, attest, publish
 ├── skills/
-│   ├── fileguard-scan/       Two-command scan flow and how to format the three result messages
+│   ├── fileguard-scan/       Fixed rules; the bot runs `fg help` for the current scan flow
 │   └── getting-started/      First-conversation install / later silent updates
 ├── backend/                  Engine installed to /workspace/fileguard on the user’s box
-│   ├── install.sh            Verified install/update (`--estimate`, `--auto`, `--tarball`, `--dir`)
+│   ├── bootstrap.sh          Stable entry point: verify latest release, run its installer
+│   ├── install.sh            Release installer (`--estimate`, `--tarball`, `--from-tree`; `--auto` -> bootstrap)
 │   ├── VERSION               Engine version (semver)
 │   ├── release-signers       Pinned public key that signs release manifests
 │   ├── requirements.lock     Hash-locked Python dependencies (wheels only)
@@ -50,17 +51,7 @@ Installs come only from **signed GitHub Releases**, never from the moving `main`
 
 `install.sh` verifies the manifest signature and the tarball SHA-256 before extracting anything (these checks are mandatory and work without `gh`). If `gh` is installed, it also runs `gh attestation verify` against the tarball and refuses to install when the attestation is missing or invalid; if `gh` is not installed, attestation is skipped. Versions are compared as semver, and a new release is checked at most once every 24 hours.
 
-**First install** (when `/workspace/fileguard` does not exist). Download, verify, extract, estimate, then install — do not pipe a script to bash:
-
-```bash
-TMP=$(mktemp -d /tmp/fileguard-src.XXXXXX) && cd "$TMP"
-BASE=https://github.com/fish-blossom/fileguard/releases/latest/download
-curl -fsSLO "$BASE/fileguard.tar.gz" && curl -fsSLO "$BASE/fileguard.tar.gz.sha256"
-sha256sum -c fileguard.tar.gz.sha256 && tar -xzf fileguard.tar.gz
-FILEGUARD_DIR=/workspace/fileguard bash fileguard/install.sh --estimate
-# After the one-line init message to the user:
-FILEGUARD_DIR=/workspace/fileguard bash fileguard/install.sh --tarball "$TMP/fileguard.tar.gz"
-```
+**Install and updates** go through `backend/bootstrap.sh` (installed as `/workspace/fileguard/bootstrap.sh`). It verifies the latest release (pinned-key signature, SHA-256, and `gh attestation verify` when `gh` is available), then runs **that release's** `install.sh`, so engine fixes never depend on the previously installed installer. If the lock is held only by this install's own clamd (old installer fd leak), it restarts that clamd first. The exact first-run commands are in `skills/getting-started/SKILL.md`; do not pipe a script to bash.
 
 `install.sh` installs a few apt packages when sudo is available, builds a Python venv from the hash-locked `requirements.lock`, installs pinned official 7-Zip and ClamAV builds (SHA-256 checked), keeps its own ClamAV signature database under `data/`, and puts `fg` on PATH. Scan data lives in `$FILEGUARD_DIR/data` (or `FILEGUARD_DATA`) and is kept across updates.
 

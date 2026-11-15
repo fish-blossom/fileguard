@@ -29,6 +29,9 @@ Two-round bot flow (estimates cover scan + writing/sending the report):
   fg confirm_incomplete <scan_id> <sha256> <check1,check2,...> <confirmed_by> [statement]
   fg report_html <scan_id> [--lang zh|en]
   fg get_report <scan_id> [--lang zh|en] [--format markdown|json|both|html]
+  fg help [--lang zh|en]
+      Print the full, versioned usage guide the bot must follow (scan flow, message format,
+      verdict and INCOMPLETE rules). Skills only point here.
   fg version [--json] / fg --version
       --json adds parser versions (7-Zip, ClamAV), signature DB date and missing components.
   fg scan <path|url>   (synchronous helper: submit + wait)
@@ -405,6 +408,7 @@ def _parser():
     gr.add_argument("scan_id")
     gr.add_argument("--format", default="markdown", choices=["markdown", "json", "both", "html", "summary"])
     sub.add_parser("version").add_argument("--json", action="store_true")
+    add_lang(sub.add_parser("help", help="print the full usage guide the bot must follow"))
     scn = add_lang(sub.add_parser("scan", help="submit + wait (synchronous helper)"))
     scn.add_argument("target")
     scn.add_argument("--expected-sha256", dest="expected_sha256", default=None)
@@ -424,7 +428,7 @@ def main(argv=None):
     if a.version or a.cmd is None:
         cmd_version()
         if a.cmd is None and not a.version:
-            print("usage: fg submit_url|submit_file|submit_pkg|wait|delivered|confirm_incomplete|report_html|get_report|version …",
+            print("usage: fg help|submit_url|submit_file|submit_pkg|wait|delivered|confirm_incomplete|report_html|get_report|version …",
                   file=sys.stderr)
         return 0
     if a.cmd == "submit_url":
@@ -446,6 +450,10 @@ def main(argv=None):
         return cmd_get_report(a.scan_id, a.lang, a.format)
     if a.cmd == "version":
         return cmd_version(as_json=a.json)
+    if a.cmd == "help":
+        from . import guide
+        print(guide.text(a.lang, _version()))
+        return 0
     if a.cmd == "scan":
         return _cmd_scan(a.target, a.lang, a.expected_sha256, a.force)
     if a.cmd == "_run":

@@ -56,6 +56,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 umask 022
+# Updates (and plain installs) go through bootstrap.sh, which verifies the latest release and
+# then runs THAT release's installer. Only --tarball / --estimate / --from-tree stay here.
+if [ "$FROM_TREE" -eq 0 ] && [ -z "$TARBALL" ] && [ "$MODE" != "estimate" ] \
+   && [ -f "$(dirname "$(readlink -f "$0")")/bootstrap.sh" ]; then
+  args=(--dir "$DIR"); [ "$FORCE_CHECK" -eq 1 ] && args+=(--force-check)
+  exec bash "$(dirname "$(readlink -f "$0")")/bootstrap.sh" "${args[@]}"
+fi
 DIR="$(realpath -m "$DIR")"
 DATA="${FILEGUARD_DATA:-$DIR/data}"
 SRC_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -210,8 +217,7 @@ is_own_clamd() {  # pid -> 0 only for the clamd of THIS install dir
   # this install's run/clamd.pid (clamd chdirs to /, so cwd cannot be used).
   local pid="$1" exe
   exe="$(readlink "/proc/$pid/exe" 2>/dev/null)" || return 1
-  case "$exe" in */clamd) ;; *) return 1 ;; esac
-  [ "$exe" = "$DIR/vendor/clamav/sbin/clamd" ] && return 0
+  case "$exe" in "$DIR"/*/clamd|"$DIR"/*"/clamd (deleted)") return 0 ;; */clamd|*"/clamd (deleted)") ;; *) return 1 ;; esac
   [ -f "$DIR/run/clamd.pid" ] && [ "$(tr -d ' \n' < "$DIR/run/clamd.pid")" = "$pid" ] && return 0
   return 1
 }
@@ -398,7 +404,7 @@ if engine_present && [ -n "$OLD_VER" ]; then ACTION="updated"; else ACTION="inst
 [ "$ACTION" = "updated" ] && [ "$OLD_VER" = "$NEW_VER" ] && ACTION="reinstalled"
 log "$ACTION FileGuard ${OLD_VER:+$OLD_VER -> }$NEW_VER at $DIR (data: $DATA)"
 mkdir -p "$DIR" "$DATA" "$DIR/run"
-MANAGED=(fileguard scripts bin rules intel clamav vendor .venv install.sh VERSION README.md LICENSE
+MANAGED=(fileguard scripts bin rules intel clamav vendor .venv install.sh bootstrap.sh VERSION README.md LICENSE
          requirements.txt requirements.lock release-signers)
 STAGE="$DIR/.stage"
 rm -rf "$STAGE" "$DIR"/.prev-* 2>/dev/null || true
@@ -432,7 +438,7 @@ for item in "${MANAGED[@]}"; do
 done
 find "$STAGE" -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
 rm -f "$STAGE/clamav/clamd.conf" "$STAGE/clamav/freshclam.conf"
-chmod +x "$STAGE/install.sh" "$STAGE/scripts/"* "$STAGE/bin/fg" 2>/dev/null || true
+chmod +x "$STAGE/install.sh" "$STAGE/bootstrap.sh" "$STAGE/scripts/"* "$STAGE/bin/fg" 2>/dev/null || true
 
 # ---- 3. venv from the hash-locked requirements (wheels only) ----
 FAIL=0
