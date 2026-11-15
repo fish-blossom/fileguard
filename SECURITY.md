@@ -28,12 +28,18 @@ live malware; use a hash or a harmless reproducer instead.
 
 ## How releases are protected / 发布如何防篡改
 
-- Each release publishes `fileguard.tar.gz`, `manifest.json` (version, commit, SHA-256) and
+- Each release is built by the GitHub Actions workflow [`.github/workflows/release.yml`](.github/workflows/release.yml)
+  on the version tag. It publishes `fileguard.tar.gz`, `manifest.json` (version, commit, SHA-256),
   `manifest.json.sig`, an `ssh-keygen -Y` signature by the FileGuard release key
-  (namespace `fileguard-release`, public key in [`backend/release-signers`](backend/release-signers)).
+  (namespace `fileguard-release`, public key in [`backend/release-signers`](backend/release-signers)),
+  and a SLSA build-provenance attestation (`fileguard.tar.gz.intoto.jsonl`, also stored in the
+  repository's attestations API).
 - `install.sh` refuses to install unless the manifest signature verifies against the **already
   installed** public key (first install: the key shipped in the bootstrap download) and the tarball
-  SHA-256 matches the manifest.
+  SHA-256 matches the manifest. These two checks are mandatory and work without `gh`.
+- If the GitHub CLI (`gh`) is installed, `install.sh` also runs
+  `gh attestation verify fileguard.tar.gz --repo fish-blossom/fileguard` and refuses to install when
+  the attestation is missing or does not match. If `gh` is not installed, attestation is skipped.
 - Third-party parsers (7-Zip, ClamAV) are official builds pinned by SHA-256; Python dependencies are
   installed from a hash-locked `requirements.lock` (wheels only).
 
@@ -45,4 +51,8 @@ Verify a release by hand:
 ssh-keygen -Y verify -f backend/release-signers -I fileguard-release@fish-blossom \
   -n fileguard-release -s manifest.json.sig < manifest.json
 sha256sum -c fileguard.tar.gz.sha256
+# Optional, when GitHub CLI is installed:
+gh attestation verify fileguard.tar.gz --repo fish-blossom/fileguard
+# Offline:
+gh attestation verify fileguard.tar.gz --repo fish-blossom/fileguard --bundle fileguard.tar.gz.intoto.jsonl
 ```

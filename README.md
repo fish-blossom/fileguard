@@ -16,6 +16,7 @@ fileguard/
 ├── memory/profile.md         Standing rules for the bot
 ├── LICENSE                   PolyForm Strict License 1.0.0
 ├── SECURITY.md               How to report a vulnerability; how releases are signed
+├── .github/workflows/        Tag-triggered release: sign, attest, publish
 ├── skills/
 │   ├── fileguard-scan/       Two-command scan flow and how to format the three result messages
 │   └── getting-started/      First-conversation install / later silent updates
@@ -44,9 +45,10 @@ Installs come only from **signed GitHub Releases**, never from the moving `main`
 
 - `manifest.json` (version, commit, tarball SHA-256) + `manifest.json.sig` (signed with the key in `backend/release-signers`)
 - `fileguard.tar.gz` (unpacks as `fileguard/`) + `fileguard.tar.gz.sha256`
+- SLSA build provenance from GitHub Actions (`fileguard.tar.gz.intoto.jsonl`, also in the repository attestations API)
 - Latest: `https://github.com/fish-blossom/fileguard/releases/latest/download/<file>`
 
-`install.sh` verifies the manifest signature and the tarball SHA-256 before extracting anything, compares versions as semver, and checks for a new release at most once every 24 hours.
+`install.sh` verifies the manifest signature and the tarball SHA-256 before extracting anything (these checks are mandatory and work without `gh`). If `gh` is installed, it also runs `gh attestation verify` against the tarball and refuses to install when the attestation is missing or invalid; if `gh` is not installed, attestation is skipped. Versions are compared as semver, and a new release is checked at most once every 24 hours.
 
 **First install** (when `/workspace/fileguard` does not exist). Download, verify, extract, estimate, then install — do not pipe a script to bash:
 

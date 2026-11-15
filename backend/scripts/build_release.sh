@@ -4,6 +4,8 @@
 #   FILEGUARD_SIGNING_KEY=~/.config/fileguard-release/release_ed25519 scripts/build_release.sh dist
 # Outputs: fileguard.tar.gz (top dir fileguard/), fileguard.tar.gz.sha256, manifest.json,
 #          manifest.json.sig (ssh-keygen -Y sign, namespace fileguard-release) when a key is given.
+# CI (.github/workflows/release.yml) also attests the tarball and manifest with GitHub Actions
+# build provenance and publishes them as a GitHub Release; do not also publish from a laptop.
 # The tarball is built from `git archive` of HEAD's backend/ so it contains exactly the committed
 # files (no venv, data, tests or caches); file times are pinned to the commit time.
 set -euo pipefail

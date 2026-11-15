@@ -10,8 +10,8 @@ description: First conversation with a new owner of the FileGuard bot.
 
 发布源只用 GitHub 上**已签名的正式 Release**（不要从 `main` 分支拉代码）：
 
-- 最新版本：`https://github.com/fish-blossom/fileguard/releases/latest/download/fileguard.tar.gz`，旁边有 `fileguard.tar.gz.sha256`、`manifest.json`、`manifest.json.sig`
-- `install.sh` 会先校验 manifest 签名和 tarball 的 SHA-256，通过后才解压安装；版本按 semver 比较，每 24 小时最多检查一次更新。
+- 最新版本：`https://github.com/fish-blossom/fileguard/releases/latest/download/fileguard.tar.gz`，旁边有 `fileguard.tar.gz.sha256`、`manifest.json`、`manifest.json.sig`，以及可选的 `fileguard.tar.gz.intoto.jsonl`（构建证明）
+- `install.sh` 会先校验 manifest 签名和 tarball 的 SHA-256（不需要 `gh`，这是必做的检查），通过后才解压安装；如果本机有 `gh`，还会再跑 `gh attestation verify` 核对 GitHub Actions 构建证明，证明无效或缺失就拒绝安装；没有 `gh` 则跳过这一步，只靠签名和哈希。版本按 semver 比较，每 24 小时最多检查一次更新。不要把构建证明或校验细节写进给用户的初始化消息。
 
 ## 第一次对话（`/workspace/fileguard` 还不存在，或 `fg --version` 失败）
 

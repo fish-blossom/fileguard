@@ -2,7 +2,12 @@
 # FileGuard engine installer / updater for a Grok Bot box (Debian/Ubuntu, /workspace writable,
 # sudo optional). Installs ONLY verified GitHub Release builds:
 #   manifest.json (+ manifest.json.sig, ssh-keygen signature by the pinned release key)
-#   -> fileguard.tar.gz whose SHA-256 must match the manifest -> extract -> install.
+#   -> fileguard.tar.gz whose SHA-256 must match the manifest
+#   -> if `gh` is on PATH, also `gh attestation verify` the tarball against this repo
+#      (SLSA provenance from GitHub Actions). Missing/invalid attestation refuses install.
+#      If `gh` is not installed, skip attestation and rely on signature + SHA-256.
+#   -> extract -> install.
+# Signature + SHA-256 are mandatory and work without `gh` or a GitHub login.
 #
 # Usage:
 #   install.sh                     install, or update to the latest release (verified)
@@ -151,6 +156,33 @@ verify_tarball() {   # $1 tarball ; manifest already verified
     log "tarball SHA-256 mismatch (manifest $want, got $got) - refusing"; return 1
   fi
 }
+
+# Optional GitHub Artifact Attestation (SLSA build provenance) produced by
+# .github/workflows/release.yml. Signature + SHA-256 above remain mandatory
+# and are sufficient when `gh` is not installed.
+#
+# If `gh` is on PATH, verify the exact tarball against $REPO and refuse to
+# install when the attestation is missing, the digest does not match, or the
+# signer is wrong. Transport / authentication errors (gh present but unable
+# to query the API) are skipped, not treated as a failed verification, so a
+# signed+hashed release still installs on a box whose `gh` is logged out.
+verify_attestation() {  # $1 tarball
+  local tb="$1" err="$TMP/attest.err"
+  if ! command -v gh >/dev/null 2>&1; then
+    log "gh not found; skipping artifact attestation (signature + SHA-256 already verified)"
+    return 0
+  fi
+  if GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 gh attestation verify "$tb" --repo "$REPO" \
+        --deny-self-hosted-runners >"$TMP/attest.out" 2>"$err"; then
+    return 0
+  fi
+  if grep -qiE 'HTTP[_ ]?(401|403)|GH_TOKEN|not logged in|authentication required|Must be authenticated|no.*credentials|to re-authenticate|error connecting|network error|dial tcp|temporary failure in name resolution|Could not resolve host' "$err"; then
+    log "gh cannot fetch artifact attestations; skipping (signature + SHA-256 already verified)"
+    return 0
+  fi
+  log "artifact attestation INVALID or missing - refusing"
+  return 1
+}
 extract_and_reexec() {   # $1 verified tarball
   mkdir -p "$TMP/x"
   tar -xzf "$1" -C "$TMP/x" --no-same-owner
@@ -266,7 +298,7 @@ if [ "$FROM_TREE" -eq 0 ]; then
     TV="$(tar -xzOf "$TARBALL" fileguard/VERSION 2>/dev/null | head -n1 | tr -d ' \t\r')"
     [ -n "$TV" ] || { log "not a FileGuard release tarball"; exit 1; }
     murl="${FILEGUARD_MANIFEST_URL:-https://github.com/$REPO/releases/download/v$TV/manifest.json}"
-    if ! fetch_manifest "$murl" || [ "$(json_get "$TMP/manifest.json" version)" != "$TV" ] || ! verify_tarball "$TARBALL"; then
+    if ! fetch_manifest "$murl" || [ "$(json_get "$TMP/manifest.json" version)" != "$TV" ] || ! verify_tarball "$TARBALL" || ! verify_attestation "$TARBALL"; then
       emit refused "$OLD" "$DIR" "$DATA" 0 "$(fg_usable && echo 1 || echo 0)" 0; exit 1
     fi
     cp "$TARBALL" "$TMP/release.tar.gz"
@@ -287,6 +319,11 @@ if [ "$FROM_TREE" -eq 0 ]; then
     dl "$TURL" "$TMP/release.tar.gz" 600 || { emit download_failed "$OLD" "$DIR" "$DATA" 0 "$(fg_usable && echo 1 || echo 0)" 0; exit 1; }
     if ! verify_tarball "$TMP/release.tar.gz"; then
       record_check "$NEW" "sha256_mismatch"
+      emit refused "$OLD" "$DIR" "$DATA" 0 "$(fg_usable && echo 1 || echo 0)" 0
+      engine_present && exit 0 || exit 1
+    fi
+    if ! verify_attestation "$TMP/release.tar.gz"; then
+      record_check "$NEW" "attestation_failed"
       emit refused "$OLD" "$DIR" "$DATA" 0 "$(fg_usable && echo 1 || echo 0)" 0
       engine_present && exit 0 || exit 1
     fi
