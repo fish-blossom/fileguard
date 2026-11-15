@@ -193,14 +193,14 @@ db = any(glob.glob(p) for p in (os.path.join(data, "clamav-db", "main.c?d"), "/v
                                  "/workspace/fileguard/data/clamav-db/main.c?d"))
 clamd_up = os.path.exists("/workspace/fileguard/run/clamd.sock")
 s = 10
-s += (40 + 8 * need_apt) if need_apt else 0
-s += 45                                   # venv + hash-locked wheels
-s += 0 if vendor else 25                  # pinned ClamAV + 7-Zip downloads
-s += 15 if db else 100                    # signature DB (seed + freshclam, or full download)
-s += 5 if clamd_up and dest != "/workspace/fileguard" else 35   # clamd start / DB load
-s += 25                                   # silent verification scan
+s += (40 + 8 * need_apt) if need_apt else 0     # apt packages (only when missing)
+s += 20                                          # venv + hash-locked wheels
+s += 0 if vendor else 10                         # pinned ClamAV + 7-Zip downloads
+s += 5 if db else 30                             # signature DB (seed + freshclam, or full download)
+s += 5 if clamd_up and dest != "/workspace/fileguard" else 30   # clamd start / DB load
+s += 10                                          # silent verification scan
 if action == "updated":
-    s = max(30, s - 25)
+    s = max(20, s - 20)
 print(int(s))
 PY
 }
@@ -213,7 +213,7 @@ if s <= 0:
 if s < 90:
     print(f"约 {s} 秒"); print(f"about {s} seconds")
 else:
-    m = max(2, int(round(s / 60 + 0.4)))
+    m = max(2, int(round(s / 60)))
     print(f"约 {m} 分钟"); print(f"about {m} minutes")
 PY
 }

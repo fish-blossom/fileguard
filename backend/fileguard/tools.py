@@ -103,7 +103,14 @@ def parser_status():
     exe, v7 = sevenzip_version()
     ok7 = bool(v7) and tuple(int(x) for x in v7.split(".")) >= MIN_7ZIP
     out.append({"tool": "7-Zip", "path": exe, "version": v7, "ok": ok7, "min": "26.06"})
-    vc = clamav_engine_version()
+    vc = None
+    try:  # the daemon actually parses the files: prefer its version over the local binaries'
+        from . import scanners
+        m = re.search(r"ClamAV (\d+\.\d+\.\d+)", scanners.clamav_version() or "")
+        vc = m.group(1) if m else None
+    except Exception:
+        vc = None
+    vc = vc or clamav_engine_version()
     okc = False
     if vc:
         t = _vtuple(vc)

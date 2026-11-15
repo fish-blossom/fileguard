@@ -28,7 +28,7 @@ if [ -f "$CONF_IN" ]; then
   mv "$CONF.tmp" "$CONF"
 fi
 SOCK=run/clamd.sock
-want="$("$CLAMD" --version 2>/dev/null | sed -E 's|^ClamAV ([0-9.]+).*|\1|' | head -n1)"
+want="$("$CLAMD" --config-file="$CONF" --version 2>/dev/null | sed -E 's|^ClamAV ([0-9.]+).*|\1|' | head -n1)"
 if [ -S "$SOCK" ] && "$CLAMDSCAN" --config-file="$CONF" --ping 1 >/dev/null 2>&1; then
   have="$("$CLAMDSCAN" --config-file="$CONF" --version 2>/dev/null | sed -E 's|^ClamAV ([0-9.]+).*|\1|' | head -n1)"
   if [ -z "$want" ] || [ "$have" = "$want" ]; then
