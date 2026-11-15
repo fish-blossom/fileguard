@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.8 (2026-11-15)
+
+- **`FILEGUARD_NO_SHARED_CLAMD=1` is honoured by the scanner.** A second install (any `--dir` other than `/workspace/fileguard`) reuses the default install's running clamd. `start_clamd.sh` already respected the opt-out, but the scanner still picked the shared clamd before trying to start its own, so the opt-out never took effect. Found in the v0.5.7 fresh-install test.
+
 ## 0.5.7 (2026-11-15)
 
 - **Example samples are installed.** 0.5.6 shipped `examples/` in the release tarball, but `install.sh` did not copy it into the install, so `fg demo 1|2` failed with "example missing". `examples/` is now a managed directory, and `fg examples` only lists bundled samples that are actually present. A regression test checks that every runtime directory in `backend/` is installed.

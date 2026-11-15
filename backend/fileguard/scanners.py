@@ -96,6 +96,8 @@ def clamd_conf():
     install's clamd on the same box so a second ~1 GB daemon is not started."""
     if _ping(config.CLAMD_CONF):
         return config.CLAMD_CONF
+    if os.environ.get("FILEGUARD_NO_SHARED_CLAMD", "0") == "1":  # same opt-out as start_clamd.sh
+        return None
     for c in _SHARED_CONFS:
         if os.path.realpath(c) != os.path.realpath(config.CLAMD_CONF) and _ping(c):
             return c
