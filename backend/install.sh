@@ -407,7 +407,7 @@ if engine_present && [ -n "$OLD_VER" ]; then ACTION="updated"; else ACTION="inst
 [ "$ACTION" = "updated" ] && [ "$OLD_VER" = "$NEW_VER" ] && ACTION="reinstalled"
 log "$ACTION FileGuard ${OLD_VER:+$OLD_VER -> }$NEW_VER at $DIR (data: $DATA)"
 mkdir -p "$DIR" "$DATA" "$DIR/run"
-MANAGED=(fileguard scripts bin rules intel clamav vendor .venv install.sh bootstrap.sh VERSION README.md LICENSE
+MANAGED=(fileguard scripts bin rules intel clamav examples vendor .venv install.sh bootstrap.sh VERSION README.md LICENSE
          requirements.txt requirements.lock release-signers)
 STAGE="$DIR/.stage"
 rm -rf "$STAGE" "$DIR"/.prev-* 2>/dev/null || true

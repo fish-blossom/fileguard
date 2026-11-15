@@ -229,6 +229,29 @@ class DemoAndExamples(unittest.TestCase):
         self.assertIn("Example test", report.build_summary(dict(rep, demo_kind="public"), "en")["demo_label"])
         self.assertIsNone(report.build_summary(dict(rep, demo=False), "zh")["demo_label"])
 
+    def test_installer_ships_every_runtime_dir(self):
+        import re
+        sh = (BACKEND / "install.sh").read_text()
+        managed = set(re.search(r"MANAGED=\(([^)]*)\)", sh, re.S).group(1).split())
+        for d in sorted(p.name for p in BACKEND.iterdir() if p.is_dir() and p.name not in ("data", "run", "dist", "vendor") and not p.name.startswith((".", "__"))):
+            self.assertIn(d, managed, f"backend/{d}/ is in the release but install.sh would not install it")
+
+    def test_examples_skips_missing_bundled_samples(self):
+        import contextlib
+        import json
+        import tempfile
+        from fileguard import cli, config
+        old = config.BASE_DIR
+        with tempfile.TemporaryDirectory() as t:
+            config.BASE_DIR = t
+            try:
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    cli.cmd_examples("en")
+            finally:
+                config.BASE_DIR = old
+        self.assertEqual([e["kind"] for e in json.loads(buf.getvalue())["examples"]], ["package", "url"])
+
     def test_guide_documents_demo_and_ready_examples(self):
         from fileguard import guide
         for lang in ("zh", "en"):

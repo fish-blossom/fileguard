@@ -167,11 +167,14 @@ EXAMPLES_TEXT = {
 
 def cmd_examples(lang):
     lang = "en" if (lang or "zh").lower().startswith("en") else "zh"
-    items = [{"id": e["id"], "kind": e["kind"], "label": e[lang], "command": e["command"].replace("{lang}", lang)} for e in EXAMPLES]
+    ex_dir = Path(config.BASE_DIR) / "examples"
+    # never offer a bundled sample this install does not have (fg demo would fail)
+    items = [{"id": e["id"], "kind": e["kind"], "label": e[lang], "command": e["command"].replace("{lang}", lang)} for e in EXAMPLES
+             if e["kind"] != "demo_sample" or (ex_dir / DEMOS.get(e["id"], "")).is_file()]
     _dump({"question": EXAMPLES_TEXT[lang]["question"], "examples": items, "decline_option": EXAMPLES_TEXT[lang]["decline"],
-           "note": ("这 4 个都是示例测试：1、2 是自带的惰性伪造样本，3、4 是公开的官方包/链接。只在用户选择后运行。"
+           "note": ("这些都是示例测试：demo_sample 是自带的惰性伪造样本，package / url 是公开的官方包/链接。只在用户选择后运行。"
                     if lang == "zh" else
-                    "All 4 are example tests: 1-2 are bundled inert fabricated samples, 3-4 are public official package/link. Run only after the user picks one.")})
+                    "All are example tests: demo_sample = bundled inert fabricated sample, package / url = public official package/link. Run only after the user picks one.")})
     return 0
 
 
