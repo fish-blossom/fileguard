@@ -25,6 +25,18 @@ STANDARD_LIMITS = [
 ]
 
 
+DEMO_LABELS = {
+    "sample": {"zh": "示例测试：这是 FileGuard 自带的惰性伪造样本，不是你的文件",
+               "en": "Example test: an inert, fabricated sample bundled with FileGuard, not your file"},
+    "public": {"zh": "示例测试：扫描的是公开的官方包 / 链接，用来演示，不是你的文件",
+               "en": "Example test: a public official package / link scanned as a demonstration, not your file"},
+}
+
+
+def demo_label(rep, lang):
+    return DEMO_LABELS.get(rep.get("demo_kind") or "sample", DEMO_LABELS["sample"])["zh" if lang != "en" else "en"]
+
+
 def build_report(ctx, verdict, error, reused, elapsed):
     m = ctx.meta
     if reused is not None:
@@ -34,6 +46,8 @@ def build_report(ctx, verdict, error, reused, elapsed):
                    original_url=m.get("original_url", rep.get("original_url", "N/A")),
                    final_url=m.get("final_url", rep.get("final_url", "N/A")))
         rep["cache_stats"] = dict(rep.get("cache_stats", {}), file_hash_cache_hit=True)
+        rep["demo"] = bool(m.get("demo"))
+        rep["demo_kind"] = m.get("demo_kind")
         rep["coverage"]["S2"] = {"status": "done", "zh": "SHA-256 命中缓存，复用之前完整检测的结果", "en": "SHA-256 cache hit; reused a prior complete scan"}
         return rep
     ctx.stage("S7", "done", "已生成报告、Hash 校验命令；引擎内的样本副本已删除，仅保留报告与 Hash",
@@ -96,6 +110,8 @@ def build_report(ctx, verdict, error, reused, elapsed):
         "files_inspected": len(ctx.files),
         "file_inventory": ctx.files[:300],
         "sample_deleted": m.get("sample_deleted", True),
+        "demo": bool(m.get("demo")),
+        "demo_kind": m.get("demo_kind"),
         "elapsed_seconds": round(elapsed, 2),
         "disclaimer": DISCLAIMER,
     }
@@ -136,6 +152,8 @@ def render_markdown(rep, lang="zh", confirmations=None):
     v = rep["verdict"]
     out = []
     out.append(f"# FileGuard {L('检测报告', 'Scan report')} — **{v}**")
+    if rep.get("demo"):
+        out.append(f"> **{L('示例测试', 'Example test')}**：{demo_label(rep, 'zh' if zh else 'en')}")
     out.append(f"**{L('结论', 'Conclusion')}：** {t(rep['verdict_reason'])}。{ADVICE[v][0 if zh else 1]}")
     if rep.get("cache_hit"):
         out.append(L(f"（同一 SHA-256 已于扫描 {rep['cache_hit']['from_scan_id']} 完整检测过，本次复用其结果）",
@@ -633,6 +651,8 @@ def build_summary(rep, lang="zh"):
         na_tx = L("检测未完成，没有结果", "Scan did not complete; no result")
         key_checks = [dict(k, status="na", text=na_tx) for k in key_checks]
     return {
+        "demo": bool(rep.get("demo")),
+        "demo_label": demo_label(rep, "zh" if zh else "en") if rep.get("demo") else None,
         "verdict": rep.get("verdict"),
         "risk_level": rep.get("risk_level"),
         "filename": rep.get("file_name"),
@@ -668,11 +688,16 @@ def render_html(rep, lang="zh", confirmations=None):
     sha = rep.get("sha256") or "N/A"
     html_lang = "zh-CN" if zh else "en"
     title = f"FileGuard {L('检测报告', 'Scan report')} — {v} — {fname}"
+    if rep.get("demo"):
+        title = f"[{L('示例测试', 'Example test')}] " + title
     conclusion = t(rep.get("verdict_reason") or {})
     advice = ADVICE.get(v, ADVICE["ERROR"])[0 if zh else 1]
     if conclusion and not conclusion.endswith(("。", ".", "！", "!", "？", "?")):
         conclusion += "。" if zh else "."
     banner_role = "alert" if v in ("BLOCK", "HIGH_RISK") else "status"
+    demo_html = (f'<section class="demo-note" role="note" style="border:2px dashed #888;padding:10px 14px;margin:12px 0;'
+                 f'font-weight:600">🧪 {_esc(demo_label(rep, "zh" if zh else "en"))}</section>'
+                 if rep.get("demo") else "")
     scanned = rep.get("scanned_at") or ""
     elapsed = rep.get("elapsed_seconds")
     timing = rep.get("timing") or {}
@@ -976,6 +1001,7 @@ def render_html(rep, lang="zh", confirmations=None):
     <div class="brand-sub">{_esc(L('静态检测报告', 'Static scan report'))}</div>
   </header>
 
+  {demo_html}
   <section class="banner v-{_esc(v)}" role="{banner_role}" aria-label="{_esc(v)} — {_esc(L('结论', 'Verdict'))}">
     <div class="banner-row">
       <div class="verdict">{_esc(v)}</div>

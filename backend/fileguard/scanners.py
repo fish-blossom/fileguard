@@ -203,12 +203,20 @@ def yara_scan(path, display_name):
                 snippets.append(inst.matched_data[:80].decode("latin-1", "replace"))
         # single-pattern rules (e.g. FG_Webshell_PHP): each distinct matched text is separate evidence
         # (`assert($_COOKIE` and `eval($_POST` are two independent sinks, not one)
+        # Overlapping instances of one regex (e.g. `>> ~/.bashrc` and `> ~/.bashrc` one byte later) are the
+        # same occurrence; keep the first/longest match per location so one line yields one finding.
         distinct = []
         if len(m.strings) == 1:
-            for inst in m.strings[0].instances[:20]:
+            taken = []          # (start, end) of kept instances
+            for inst in sorted(m.strings[0].instances[:50], key=lambda i: (i.offset, -i.matched_length)):
+                start, end = inst.offset, inst.offset + inst.matched_length
+                if any(start < e and s < end for s, e in taken):
+                    continue
                 d = inst.matched_data[:80].decode("latin-1", "replace")
-                if d not in distinct:
-                    distinct.append(d)
+                if d in distinct:
+                    continue
+                taken.append((start, end))
+                distinct.append(d)
                 if len(distinct) >= 3:
                     break
         out.append({"rule": m.rule, "severity": m.meta.get("severity", "medium"),

@@ -38,7 +38,8 @@ fi; echo "BOOT=$BOOT"
 1. 预估：`bash "$(dirname "$BOOT")/install.sh" --estimate --dir /workspace/fileguard`。JSON 里 `action` 为 `installed` 时先发一句：`⚙️ 正在初始化 FileGuard，预计<estimate_text_zh>`（英文：`⚙️ Initializing FileGuard, <estimate_text_en>`）。只用返回的文字，不要自己编时间，也不要罗列组件。
 2. 安装：`bash "$BOOT" --dir /workspace/fileguard`（`block_until_ms` 设为 600000）。不要转发日志。输出 JSON 里 `usable` 为 true 才算成功。
 3. 成功后在同一轮里**静默**用 `/workspace/fileguard/scripts/fg submit_url` + `fg wait` 扫描 `https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz` 做连通验证，结果不发给用户。
-4. 通过后只发一句：`✅ 初始化完成，可以开始检测了`（英文：`✅ FileGuard is ready. Send a file or a link to scan.`），然后问对方想检查什么。
+4. 通过后先发一句：`✅ 初始化完成，可以开始检测了`（英文：`✅ FileGuard is ready. Send a file or a link to scan.`）。
+5. 紧接着运行 `/workspace/fileguard/scripts/fg examples --lang <zh|en>`，把输出的 4 个示例测试接在后面，优先用按钮卡片（widget）：问题用 `question`，选项用 4 个 `examples[].label` 加上 `decline_option`。用户选了哪个，再按 `fg help` 运行对应的 `command` 并照常出结果，结果里要说明这是示例测试、不是用户的文件。命令不存在或出错（旧版引擎）就跳过这一步，不提示，直接问对方想检查什么。
 
 **失败**（安装失败或引擎不可用）：不要说已经就绪，只用一句话说明「FileGuard 没能完成初始化，暂时无法检测。」，不列缺失组件或报错细节。
 

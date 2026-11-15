@@ -17,6 +17,8 @@ UNCOMMON_BACKENDS_OK = ("setuptools.build_meta", "poetry.core.masonry.api", "poe
                         "mesonpy", "setuptools.build_meta:__legacy__", "sipbuild.api", "jupyter_packaging.build_api",
                         "whey", "enscons.api", "pbr.build")
 DEB_CONTROL_DATA = {"conffiles", "md5sums", "sha256sums", "shlibs", "symbols", "templates", "control", "triggers", "clilibs", "starlibs"}
+SUDOERS_PATH_RE = re.compile(r"(^|/)etc/sudoers(\.d/[^/]+)?$")
+SUDO_OWNER_PACKAGES = {"sudo", "sudo-ldap", "sudo-rs"}
 RTLO = "\u202e"
 EXEC_EXT = {"exe", "scr", "com", "bat", "cmd", "pif", "vbs", "js", "jse", "wsf", "hta", "lnk", "ps1", "msi", "jar", "dll", "cpl"}
 DECOY_EXT = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png", "gif", "txt", "mp4", "mp3", "zip", "rar", "csv"}
@@ -82,7 +84,11 @@ def text_checks(ctx, an, rel, name, ext, data):
         if m:
             sev = "high" if b"package" in m.group(0) else "medium"
             ctx.add(sev, "S3", "ANTI_FORENSICS", f"掩盖痕迹：{zh}", f"Anti-forensics: {en}", rel, m.group(0)[:80].decode("latin-1"))
+    deb_cfg = an is not None and getattr(an, "deb_payload", None) and an.deb_payload(rel) \
+        and SUDOERS_PATH_RE.search(rel.split("!/")[-1])
     for pat, zh, en, sev in PERSIST_WRITE:
+        if deb_cfg and b"sudoers" in pat:
+            continue          # a shipped sudoers file is judged by its grants in sudoers_checks()
         m = re.search(pat, data, re.I)
         if m:
             ctx.add(sev, "S3", "PERSISTENCE_OR_MASQUERADE", zh, en, rel, m.group(0)[:80].decode("latin-1"))
@@ -263,6 +269,44 @@ def msi_custom_actions(out):
             continue
         rows.append((cols[0], cols[1].strip(), cols[2], cols[3].strip()))
     return rows
+
+
+def sudoers_grants(data):
+    """Risky grants in sudoers text: NOPASSWD anywhere, or full ALL rights for a principal other than
+    root / the stock admin groups (%sudo %admin %wheel)."""
+    out = []
+    for line in data.decode("utf-8", "replace").splitlines():
+        t = line.split("#", 1)[0].strip() if not line.lstrip().startswith("#include") else ""
+        if not t or t.startswith(("Defaults", "@include", "Cmnd_Alias", "User_Alias", "Host_Alias", "Runas_Alias")):
+            continue
+        who = t.split()[0]
+        if re.search(r"\bNOPASSWD\s*:", t):
+            out.append(t[:120])
+        elif re.search(r"=\s*(\([^)]*\)\s*)?ALL\s*$", t) and who not in ("root", "%sudo", "%admin", "%wheel"):
+            out.append(t[:120])
+    return out
+
+
+def sudoers_checks(ctx, files, package):
+    """Sudoers files shipped in a .deb data.tar. `files`: [(rel, abs_path)]; `package`: Package: from control."""
+    for rel, path in files:
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read(1_000_000)
+        except OSError:
+            continue
+        inst_path = "/" + rel.split("!/")[-1].lstrip("./")
+        grants = sudoers_grants(data)
+        if grants:
+            ctx.add("high", "S3", "SUDOERS_GRANT", f"安装包写入 sudoers 规则并授予高权限：{inst_path}（{grants[0]}）",
+                    f"Package installs a sudoers rule granting broad privileges: {inst_path} ({grants[0]})", rel, grants[0][:100])
+            ctx.footprint.append({"kind": "observed", "zh": f"安装后 {inst_path} 授予 sudo 权限", "en": f"After install {inst_path} grants sudo rights"})
+        elif package in SUDO_OWNER_PACKAGES:
+            ctx.add("info", "S3", "SUDOERS_SHIPPED_BY_OWNER", f"{package} 包自带的 sudoers 配置（无免密/越权授权）：{inst_path}",
+                    f"{package} ships its own sudoers config (no NOPASSWD / broad grants): {inst_path}", rel)
+        else:
+            ctx.add("medium", "S3", "SUDOERS_SHIPPED", f"安装包（{package or '未知'}）会安装 sudoers 配置：{inst_path}",
+                    f"Package ({package or 'unknown'}) installs a sudoers config: {inst_path}", rel)
 
 
 def pe_installer_kind(path):

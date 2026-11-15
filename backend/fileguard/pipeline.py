@@ -55,6 +55,9 @@ def run_scan(scan_id, source, lang="zh", progress=None, expected_sha256=None, fo
     """source: {"kind": "url", "url": ...} | {"kind": "path", "path": ..., "filename": ...} |
                {"kind": "base64", "data": ..., "filename": ...}"""
     ctx = ScanContext(scan_id, lang)
+    # example tests (`fg demo`, `submit_pkg/submit_url --example`): never a user's file, clearly labelled
+    ctx.meta["demo"] = bool(source.get("demo"))
+    ctx.meta["demo_kind"] = source.get("demo") if source.get("demo") in ("sample", "public") else ("sample" if source.get("demo") else None)
     t0 = time.time()
     # No overall scan timeout (user decision). ctx.deadline is only a progress heartbeat; hang protection is
     # per step (each network request: NET_STALL_TIMEOUT without progress; each tool process: its own limit),
@@ -94,6 +97,17 @@ def run_scan(scan_id, source, lang="zh", progress=None, expected_sha256=None, fo
     report = build_report(ctx, verdict, error, reused, time.time() - t0)
     _s7_followup(ctx, report, verdict)
     return report
+
+
+def _inner_path(path):
+    """Path of a finding inside its innermost archive. A single compressed stream (x/changelog.gz!/changelog)
+    keeps its directory, so docs/tests context is not lost when a file was gzip'ed inside a package."""
+    segs = (path or "").split("!/")
+    inner = segs[-1]
+    if len(segs) > 2 and re.search(r"\.(gz|bz2|xz|zst)$", segs[-2], re.I) and not re.search(r"\.tar\.[a-z0-9]+$|\.t[gbx]z$", segs[-2], re.I) \
+            and "/" not in inner:
+        inner = segs[-2].rsplit("/", 1)[0] + "/" + inner if "/" in segs[-2] else inner
+    return inner
 
 
 # ---------------------------------------------------------------- S0
@@ -345,6 +359,7 @@ def _s3_static(ctx, sample, work, prog):
     # format analyzers + YARA (manifests first so install-hook files are known)
     prog("S3:yara+analyzers")
     an = Analyzer(ctx, _yara_on_bytes)
+    an.deb_payload = unp.in_deb_payload
     ctx.tools["yara"] = scanners.yara_version()
     order = sorted(inv, key=lambda i: (0 if Path(i["rel"].split("!/")[-1]).name in ("package.json", "setup.py") else 1, i["depth"]))
     yara_hits = {}
@@ -381,7 +396,7 @@ def _s3_static(ctx, sample, work, prog):
         nonrt = re.compile(r"(^|/)(docs?|ci|\.github|\.gitlab|tests?|testing|examples?|samples?|benchmarks?|vendored-[^/]+/[^/]+/ci)/", re.I)
         down = {"high": "medium", "medium": "low"}
         for f in ctx.findings:
-            inner = (f.path or "").split("!/")[-1]
+            inner = _inner_path(f.path)
             if f.stage == "S3" and f.severity in down and nonrt.search(inner) and Path(inner).name not in an.hook_files \
                     and not f.code.startswith(("CLAMAV", "KNOWN", "NETWORK_IOC", "INSTALL_HOOK", "ARCHIVE_")):
                 f.severity = down[f.severity]
@@ -651,6 +666,8 @@ def _s5_footprint(ctx, prog):
 def _s7_followup(ctx, report, verdict):
     sha = report.get("sha256")
     v = verdict["verdict"]
+    if ctx.meta.get("demo"):
+        return            # example scans never feed the hash cache, baselines or signer history
     if sha and v in ("BLOCK", "HIGH_RISK", "NO_FINDINGS") and not ctx.meta.get("cache_hit"):
         store.cache_put_hash(sha, ENGINE_VERSION, scanners.rules_version(), scanners.sigs_version(), v, ctx.scan_id)
     pkg = ctx.meta.get("package")

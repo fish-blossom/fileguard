@@ -55,8 +55,16 @@ class ScanContext:
     def add(self, *a, **kw):
         f = Finding(*a, **kw)
         key = (f.code, f.path, f.evidence)
-        if not any((x.code, x.path, x.evidence) == key for x in self.findings):
-            self.findings.append(f)
+        for x in self.findings:
+            if (x.code, x.path, x.evidence) == key:
+                return x
+            # same detector, same file, one evidence string contained in the other: same occurrence
+            if x.code == f.code and x.path == f.path and x.evidence and f.evidence \
+                    and (f.evidence in x.evidence or x.evidence in f.evidence):
+                if SEVERITY_ORDER.get(f.severity, 0) > SEVERITY_ORDER.get(x.severity, 0):
+                    x.severity = f.severity
+                return x
+        self.findings.append(f)
         return f
 
     def miss(self, stage, code, zh, en, path=None):

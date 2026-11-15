@@ -55,7 +55,10 @@ def _prepare_source(scan_id, source):
         filename = filename or "upload.bin"
     else:
         return src
-    return {"kind": "path", "path": str(dest), "filename": filename}
+    out = {"kind": "path", "path": str(dest), "filename": filename}
+    if src.get("demo"):
+        out["demo"] = src["demo"]
+    return out
 
 
 def _spawn_worker(scan_id):
@@ -260,6 +263,8 @@ def get_report(scan_id, lang=None, fmt="markdown"):
            "summary": build_summary(rep, lang),
            "cache_hit": bool(ch),
            "reused_from": ch.get("from_scan_id"),
+           "demo": bool(rep.get("demo")),
+           "demo_kind": rep.get("demo_kind"),
            "file_name": rep.get("file_name"),
            "file_size": rep.get("file_size"),
            "file_type": rep.get("file_type"),

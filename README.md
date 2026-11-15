@@ -16,7 +16,7 @@ fileguard/
 ├── memory/profile.md         Standing rules for the bot
 ├── LICENSE                   PolyForm Strict License 1.0.0
 ├── SECURITY.md               How to report a vulnerability; how releases are signed
-├── .github/workflows/        Tag-triggered release: sign, attest, publish
+├── .github/workflows/        release.yml (tag: sign, attest, publish); tests.yml (regression tests)
 ├── skills/
 │   ├── fileguard-scan/       Fixed rules; the bot runs `fg help` for the current scan flow
 │   └── getting-started/      First-conversation install / later silent updates
@@ -31,14 +31,19 @@ fileguard/
 │   ├── rules/fileguard.yar   YARA rules
 │   ├── clamav/clamd.conf.in  clamd config template
 │   ├── scripts/              fg, env.sh, start_clamd.sh, update_clamav_db.sh, build_release.sh
+│   ├── examples/             Two inert fabricated demo samples for `fg demo 1|2` (see its README)
 │   └── requirements.txt
+├── tests/
+│   ├── regression/           Unit/regression tests (python -m unittest discover -s tests/regression)
+│   ├── run_batch.py          Runs a full sample batch through an installed engine
+│   └── samples/              Generated test batches (inert fabricated samples + generator); see tests/README.md
 └── docs/
     ├── detection-checklist.md
     ├── searchskill-submission.md
     └── sample-reports/       Illustrative reports (no EICAR test-file reports)
 ```
 
-This repository does **not** include tests, sample malware fixtures, virtualenvs, or scan data.
+`tests/` holds regression tests and generated test batches. Every "suspicious" sample there and in `backend/examples/` is fabricated and inert: no real malware, payload URLs use reserved/documentation addresses, and nothing is meant to be executed. `tests/` is not part of the release tarball (`build_release.sh` packs only `backend/`). The repository does not include real malware, virtualenvs, or scan data.
 
 ## How the bot installs the engine
 

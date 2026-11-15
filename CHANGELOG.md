@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.6 (2026-11-15)
+
+Follow-ups from test batch 20261115-0558 and the real-package false-positive check.
+
+- **One finding per underlying issue.**
+  - Overlapping matches of a single-pattern YARA rule (for example `>> ~/.bashrc` and `> ~/.bashrc` at the same spot) are reported once.
+  - Findings with the same code and path whose evidence is a substring of another are merged, keeping the higher severity.
+- **Encoded payload passed to `eval` is high.** `eval` / `Function` / `exec` called on a Base64 / `fromCharCode` / hex / `unescape` literal is reported as `OBFUSCATED_EVAL_PAYLOAD` (high); plain `eval` use stays as before.
+- **Debian `sudo` is no longer HIGH_RISK.**
+  - sudoers files in a `.deb` payload get a dedicated check: `NOPASSWD` or broad `ALL` grants to non-standard principals are high; the stock config shipped by the `sudo` package itself is info; other sudoers files are medium.
+  - setuid files inside a `.deb` payload are low (still listed).
+  - `LD_PRELOAD` handling is split: `/etc/ld.so.preload` stays medium, a bare `LD_PRELOAD` string in an ELF is low.
+  - Context downgrades (docs/tests/examples paths) now also see the inner path of `.gz`/`.zst` streams.
+- **Example tests.** `fg examples --lang zh|en` lists four example tests; `fg demo 1|2` scans a bundled inert fabricated sample from `backend/examples/` (temporary copy); `submit_pkg` / `submit_url` accept `--example`. Example scans are marked `demo: true` with a label in the summary and HTML report and are never cached. A fresh install's JSON carries `after_ready`, and the getting-started skill shows the examples (as a widget) right after the ready line; engines without `fg examples` skip this silently.
+- **Tests are in the repository.** `tests/regression/`, `tests/run_batch.py` and the generated sample batch with its generator are committed; a `tests` workflow runs them. `tests/` is not in the release tarball.
+
 ## 0.5.5 (2026-11-15)
 
 Fixes from test batch 20261115-0558 (38 generated samples).

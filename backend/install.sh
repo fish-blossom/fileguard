@@ -248,9 +248,12 @@ emit() {  # action version ok usable rolled_back [missing...]
   python3 - "$@" << 'PY'
 import json, sys
 action, version, d, data, ok, usable, rolled, *missing = sys.argv[1:]
-print(json.dumps({"action": action, "version": version, "dir": d, "data_dir": data, "ok": ok == "1",
-                  "usable": usable == "1", "rolled_back": rolled == "1", "missing_components": missing},
-                 ensure_ascii=False))
+out = {"action": action, "version": version, "dir": d, "data_dir": data, "ok": ok == "1",
+       "usable": usable == "1", "rolled_back": rolled == "1", "missing_components": missing}
+if action == "installed" and usable == "1":
+    # first install only (never on silent updates): the bot appends the engine's example list after the ready line
+    out["after_ready"] = "fg examples --lang <zh|en>"
+print(json.dumps(out, ensure_ascii=False))
 PY
 }
 

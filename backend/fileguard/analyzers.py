@@ -15,6 +15,13 @@ from . import installers as inst
 URL_RE = re.compile(rb"https?://[A-Za-z0-9.\-]{3,253}(?::\d+)?(?:/[^\s\"'<>`)]{0,200})?")
 IP_RE = re.compile(rb"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b")
 B64_RE = re.compile(rb"[A-Za-z0-9+/]{200,}={0,2}")
+# dynamic execution whose argument is a decoder applied to an encoded string LITERAL (payload hidden in the file)
+ENC_LIT = rb"""(?:'[A-Za-z0-9+/=%\\xu_\-]{24,}'|"[A-Za-z0-9+/=%\\xu_\-]{24,}"|`[A-Za-z0-9+/=%\\xu_\-]{24,}`)"""
+EVAL_PAYLOAD_RE = re.compile(
+    rb"(?:\beval|\bFunction|\bexecSync|\bexec|\bsetTimeout|\bsetInterval|\bvm\.runIn\w*Context|\bcompile)\s*\(\s*(?:new\s+)?(?:"
+    rb"(?:atob|unescape|decodeURIComponent|Buffer\.from|base64\.b64decode|bytes\.fromhex|codecs\.decode|"
+    rb"zlib\.decompress\s*\(\s*base64\.b64decode|__import__\(\s*['\"]base64['\"]\s*\)\.b64decode)\s*\(\s*" + ENC_LIT +
+    rb"|String\.fromCharCode\s*\(\s*\d{1,3}(?:\s*,\s*\d{1,3}){15,})")
 EVAL_RE = re.compile(rb"\b(eval|exec|Function|execSync|spawn|os\.system|subprocess|Invoke-Expression|IEX)\s*\(")
 PDF_URI_RE = re.compile(rb"/URI\s*\(((?:[^()\\]|\\.){1,400})\)")
 PDF_IP_HOST_RE = re.compile(rb"^[a-z][a-z0-9+.\-]*://(?:[^/@\s]*@)?(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?::\d+)?(?:[/?#]|$)", re.I)
@@ -115,6 +122,9 @@ class Analyzer:
         self.module_refs = {}      # pkg_root -> set(module names referenced by require/import)
         self.manifest_files = {}   # pkg_root -> {basename: abs path}
         self.file_hashes = {}      # rel (sans container prefix) -> sha256 (for S4 diff)
+        self.deb_payload = lambda rel: False   # set by the pipeline: is `rel` installed from a .deb data.tar?
+        self.deb_package = None    # Package: field of a .deb control file
+        self.deb_sudoers = []      # (rel, abs) sudoers files shipped in a .deb payload
 
     # --------------------------------------------------------------
     def analyze(self, item):
@@ -164,11 +174,16 @@ class Analyzer:
         elif ext == "pth":
             self.ctx.footprint.append({"kind": "predicted", "zh": f"安装后 Python 每次启动都会处理 .pth 文件：{rel}",
                                        "en": f"Python processes this .pth file at every interpreter start: {rel}"})
+        elif name == "control" and "!/control.tar" in rel and self.deb_package is None:
+            m = re.search(rb"^Package:\s*(\S+)", self._read_text(path)[:65536], re.M)
+            self.deb_package = m.group(1).decode("latin-1").lower() if m else ""
         elif name in ("preinst", "postinst", "prerm", "postrm", "config"):
             self.hooks[f"debian:{name}"] = rel
             self.hook_files.add(name)
             self.ctx.footprint.append({"kind": "predicted", "zh": f"Debian 维护脚本会在安装/卸载时以 root 运行：{name}",
                                        "en": f"Debian maintainer script runs as root during install/remove: {name}"})
+        if self.deb_payload(rel) and inst.SUDOERS_PATH_RE.search(rel.split("!/")[-1]):
+            self.deb_sudoers.append((rel, path))
         if head[:2] == b"MZ":
             self._pe(path, rel, ext)
         elif head[:4] == b"\x7fELF":
@@ -209,6 +224,11 @@ class Analyzer:
                              f"Install script silently swallows errors with empty try/catch ({ec})", rel)
         ev = len(EVAL_RE.findall(data))
         self.eval_count += ev
+        if ext in SCRIPT_EXT or ext in ("jsx", "tsx", ""):
+            m = EVAL_PAYLOAD_RE.search(data)
+            if m:
+                self.ctx.add("high", "S3", "OBFUSCATED_EVAL_PAYLOAD", "把编码后的隐藏代码解码后直接交给 eval/Function/exec 执行",
+                             "Decodes an encoded payload literal and passes it straight to eval/Function/exec", rel, m.group(0)[:80].decode("latin-1"))
         inst.text_checks(self.ctx, self, rel, name, ext, data)
         if ext == "nsi":
             inst.nsis_script_checks(self.ctx, rel, data)
@@ -277,6 +297,8 @@ class Analyzer:
 
     def finalize(self, dep_results):
         """Cross-file checks after every file was analyzed."""
+        if self.deb_sudoers:
+            inst.sudoers_checks(self.ctx, self.deb_sudoers, self.deb_package or "")
         # (5) anti-forensics: package.json vs sibling decoy manifest
         for root, files in self.manifest_files.items():
             if "package.json" not in files:
@@ -460,9 +482,12 @@ class Analyzer:
             data = f.read(min(4_000_000, config.TEXT_ANALYSIS_MAX_BYTES))
         if b"UPX!" in data:
             self.ctx.add("medium", "S3", "ELF_UPX_PACKED", "ELF 文件被 UPX 加壳", "ELF file packed with UPX", rel)
-        if b"LD_PRELOAD" in data or b"/etc/ld.so.preload" in data:
-            self.ctx.add("medium", "S3", "ELF_PRELOAD", "ELF 引用 LD_PRELOAD / ld.so.preload（可能劫持动态库）",
-                         "ELF references LD_PRELOAD / ld.so.preload (library hijack)", rel)
+        if b"/etc/ld.so.preload" in data:
+            self.ctx.add("medium", "S3", "ELF_PRELOAD", "ELF 引用 /etc/ld.so.preload（可能全局劫持动态库）",
+                         "ELF references /etc/ld.so.preload (global library hijack)", rel, "/etc/ld.so.preload")
+        elif b"LD_PRELOAD" in data:
+            # many system tools (sudo, ld.so, fakeroot) only name LD_PRELOAD to sanitize or document it
+            self.ctx.add("low", "S3", "ELF_PRELOAD", "ELF 引用 LD_PRELOAD 环境变量", "ELF references the LD_PRELOAD variable", rel, "LD_PRELOAD")
 
     def _office(self, path, rel, ext):
         try:

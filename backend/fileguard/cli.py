@@ -148,15 +148,78 @@ def _type_label(r):
     return "file"
 
 
-def cmd_submit(kind, target, lang, expected_sha256=None, force=False):
+DEMOS = {1: "uuidd-2.11.16.tgz", 2: "invoice_431.pdf"}
+EXAMPLES = [
+    {"id": 1, "kind": "demo_sample", "command": "fg demo 1 --lang {lang}",
+     "zh": "示例 1：伪造的投毒 npm 包（uuidd-2.11.16.tgz）", "en": "Example 1: a fabricated poisoned npm package (uuidd-2.11.16.tgz)"},
+    {"id": 2, "kind": "demo_sample", "command": "fg demo 2 --lang {lang}",
+     "zh": "示例 2：伪造的恶意 PDF（invoice_431.pdf）", "en": "Example 2: a fabricated malicious PDF (invoice_431.pdf)"},
+    {"id": 3, "kind": "package", "command": "fg submit_pkg npm left-pad 1.3.0 --example --lang {lang}",
+     "zh": "示例 3：按包名和版本检测（npm left-pad 1.3.0）", "en": "Example 3: scan by package name and version (npm left-pad 1.3.0)"},
+    {"id": 4, "kind": "url", "command": "fg submit_url https://files.pythonhosted.org/packages/py3/r/requests/requests-2.32.3-py3-none-any.whl --example --lang {lang}",
+     "zh": "示例 4：按下载链接检测（PyPI requests 2.32.3 官方 wheel）", "en": "Example 4: scan a download link (official PyPI requests 2.32.3 wheel)"},
+]
+EXAMPLES_TEXT = {
+    "zh": {"question": "想先看看示例测试吗？（都是示例，不涉及你的文件）", "decline": "不用了，我直接发文件"},
+    "en": {"question": "Want to try an example test first? (examples only, none of your files)", "decline": "No thanks, I'll send a file"},
+}
+
+
+def cmd_examples(lang):
+    lang = "en" if (lang or "zh").lower().startswith("en") else "zh"
+    items = [{"id": e["id"], "kind": e["kind"], "label": e[lang], "command": e["command"].replace("{lang}", lang)} for e in EXAMPLES]
+    _dump({"question": EXAMPLES_TEXT[lang]["question"], "examples": items, "decline_option": EXAMPLES_TEXT[lang]["decline"],
+           "note": ("这 4 个都是示例测试：1、2 是自带的惰性伪造样本，3、4 是公开的官方包/链接。只在用户选择后运行。"
+                    if lang == "zh" else
+                    "All 4 are example tests: 1-2 are bundled inert fabricated samples, 3-4 are public official package/link. Run only after the user picks one.")})
+    return 0
+
+
+DEMO_NOTICE = {"zh": "这是示例测试：扫描的是 FileGuard 自带的惰性伪造样本（{name}），不是你的文件。",
+               "en": "This is an example test: it scans an inert, fabricated sample bundled with FileGuard ({name}), not your file."}
+
+
+def _example_extra(lang, what):
+    zh = not (lang or "zh").lower().startswith("en")
+    return {"demo": True, "demo_kind": "public",
+            "demo_notice": f"这是示例测试：扫描的是公开的官方包/链接（{what}），不是你的文件。" if zh else
+            f"This is an example test: it scans a public official package/link ({what}), not your file."}
+
+
+def cmd_demo(which, lang):
+    """Scan a temp copy of a bundled inert example. Only when the user asks to try / see an example."""
+    import shutil
+    import tempfile
+    lang = "en" if (lang or "zh").lower().startswith("en") else "zh"
+    name = DEMOS.get(int(which or 1))
+    if not name:
+        _fail(f"demo: choose 1 or 2 ({', '.join(f'{k}={v}' for k, v in DEMOS.items())})")
+    src = Path(config.BASE_DIR) / "examples" / name
+    if not src.is_file():
+        _fail(f"demo: example missing: {src}")
+    tmp = Path(tempfile.mkdtemp(prefix="fileguard-demo-"))
+    try:
+        cp = tmp / name
+        shutil.copyfile(src, cp)
+        extra = {"demo": True, "demo_kind": "sample", "demo_file": name, "demo_notice": DEMO_NOTICE[lang].format(name=name)}
+        return cmd_submit("file", str(cp), lang, None, True, demo="sample", extra=extra)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)   # submit already copied it into the scan dir
+
+
+def cmd_submit(kind, target, lang, expected_sha256=None, force=False, demo=False, extra=None):
     lang = "en" if (lang or "zh").lower().startswith("en") else "zh"
     if kind == "url":
         src = {"kind": "url", "url": target}
+        if demo:
+            src["demo"] = demo
     else:
         path = Path(target)
         if not path.is_file():
             _fail(f"submit_file: not a file: {target}")
         src = {"kind": "path", "path": str(path.resolve()), "filename": path.name}
+        if demo:
+            src["demo"] = demo
     r = service.submit(src, lang, expected_sha256=expected_sha256, force_rescan=force)
     if not isinstance(r, dict) or not r.get("scan_id"):
         _fail(f"submit failed: {r}")
@@ -174,6 +237,8 @@ def cmd_submit(kind, target, lang, expected_sha256=None, force=False):
         "estimate_text": deliv.total_estimate_text(engine, oh, lo, hi, lang),
         "overhead_source": src_model,
     }
+    if extra:
+        out.update(extra)
     deliv.mark_submitted(out["scan_id"], engine)
     _dump(out)
     return 0
@@ -263,6 +328,8 @@ def cmd_wait(scan_id, lang, timeout=None):
     out = {
         "scan_id": scan_id,
         "status": r.get("status"),
+        "demo": bool(r.get("demo") or (r.get("summary") or {}).get("demo")),
+        "demo_kind": r.get("demo_kind"),
         "verdict": r.get("verdict"),
         "risk_level": r.get("risk_level"),
         "cache_hit": bool(r.get("cache_hit")),
@@ -383,6 +450,7 @@ def _parser():
     su.add_argument("url")
     su.add_argument("--expected-sha256", "--sha256", dest="expected_sha256", default=None)
     su.add_argument("--force", action="store_true")
+    su.add_argument("--example", action="store_true", help="label this scan as an example test (only for `fg examples`)")
     sf = add_lang(sub.add_parser("submit_file", help="submit a local file; print estimate JSON"))
     sf.add_argument("path")
     sf.add_argument("--expected-sha256", "--sha256", dest="expected_sha256", default=None)
@@ -393,6 +461,7 @@ def _parser():
     sp.add_argument("pkg_version")
     sp.add_argument("--expected-sha256", "--sha256", dest="expected_sha256", default=None)
     sp.add_argument("--force", action="store_true")
+    sp.add_argument("--example", action="store_true", help="label this scan as an example test (only for `fg examples`)")
     sw = add_lang(sub.add_parser("wait", help="block until done; print compact result JSON"))
     sw.add_argument("scan_id")
     sw.add_argument("--timeout", type=float, default=None, help="return early (exit 3) with the current stage")
@@ -409,6 +478,9 @@ def _parser():
     gr.add_argument("--format", default="markdown", choices=["markdown", "json", "both", "html", "summary"])
     sub.add_parser("version").add_argument("--json", action="store_true")
     add_lang(sub.add_parser("help", help="print the full usage guide the bot must follow"))
+    add_lang(sub.add_parser("examples", help="the 4 example tests offered after the ready line (JSON)"))
+    dm = add_lang(sub.add_parser("demo", help="scan a bundled inert example (only when the user asks for an example)"))
+    dm.add_argument("which", nargs="?", type=int, default=1, choices=sorted(DEMOS))
     scn = add_lang(sub.add_parser("scan", help="submit + wait (synchronous helper)"))
     scn.add_argument("target")
     scn.add_argument("--expected-sha256", dest="expected_sha256", default=None)
@@ -432,12 +504,14 @@ def main(argv=None):
                   file=sys.stderr)
         return 0
     if a.cmd == "submit_url":
-        return cmd_submit("url", a.url, a.lang, a.expected_sha256, a.force)
+        return cmd_submit("url", a.url, a.lang, a.expected_sha256, a.force, demo="public" if a.example else False,
+                          extra=_example_extra(a.lang, a.url) if a.example else None)
     if a.cmd == "submit_file":
         return cmd_submit("file", a.path, a.lang, a.expected_sha256, a.force)
     if a.cmd == "submit_pkg":
         url, sha = resolve_pkg(a.ecosystem, a.name, a.pkg_version)
-        return cmd_submit("url", url, a.lang, a.expected_sha256 or sha, a.force)
+        return cmd_submit("url", url, a.lang, a.expected_sha256 or sha, a.force, demo="public" if a.example else False,
+                          extra=_example_extra(a.lang, f"{a.ecosystem} {a.name} {a.pkg_version}") if a.example else None)
     if a.cmd == "wait":
         return cmd_wait(a.scan_id, a.lang, a.timeout)
     if a.cmd == "delivered":
@@ -454,6 +528,10 @@ def main(argv=None):
         from . import guide
         print(guide.text(a.lang, _version()))
         return 0
+    if a.cmd == "examples":
+        return cmd_examples(a.lang)
+    if a.cmd == "demo":
+        return cmd_demo(a.which, a.lang)
     if a.cmd == "scan":
         return _cmd_scan(a.target, a.lang, a.expected_sha256, a.force)
     if a.cmd == "_run":

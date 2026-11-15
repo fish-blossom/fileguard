@@ -231,6 +231,10 @@ class Unpacker:
                 return parts[i + 1].startswith("data.tar") and all("data.tar" in p for p in parts[i + 1:])
         return False
 
+    def in_deb_payload(self, rel):
+        """True if the file `rel` was unpacked from a .deb's data.tar (i.e. it is installed under /)."""
+        return "!/" in rel and self._deb_payload(rel.rsplit("!/", 1)[0])
+
     def _x_tar(self, item):
         rel0 = item["rel"]
         deb_payload = self._deb_payload(rel0)
@@ -264,8 +268,14 @@ class Unpacker:
                     if not self._count_ok(rel):
                         return
                     if m.mode & 0o4000:
-                        self.ctx.add("medium", "S3", "ARCHIVE_SETUID", f"tar 中文件带 setuid 位：{name}",
-                                     f"Tar entry has setuid bit: {name}", rel0, name)
+                        if deb_payload:
+                            # installing a .deb already runs maintainer scripts as root, so a setuid file in its
+                            # payload grants nothing new; common for system tools (sudo, passwd, mount)
+                            self.ctx.add("low", "S3", "ARCHIVE_SETUID", f".deb 安装 setuid 文件：{name}",
+                                         f".deb installs a setuid file: {name}", rel0, name)
+                        else:
+                            self.ctx.add("medium", "S3", "ARCHIVE_SETUID", f"tar 中文件带 setuid 位：{name}",
+                                         f"Tar entry has setuid bit: {name}", rel0, name)
                     left = self._budget_left()
                     if m.size > left:
                         csize = os.path.getsize(item["abs"]) or 1

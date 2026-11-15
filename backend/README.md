@@ -44,7 +44,7 @@ FileGuard 是一个**只做静态分析**的恶意文件 / 软件供应链投毒
 ├── intel/                  # 本地情报：已知恶意 Hash、恶意包名单、网络 IOC、热门包名
 ├── clamav/                 # clamd.conf.in / freshclam.conf.in 模板（脚本写入实际路径）
 ├── scripts/                # fg、env.sh、start_clamd.sh、update_clamav_db.sh、build_release.sh
-├── （本公开仓库不含 tests/）
+├── examples/               # `fg demo 1|2` 用的两个惰性伪造示例样本（见其 README）
 └── data/                   # 运行时（FILEGUARD_DATA，默认 $FILEGUARD_HOME/data）
     ├── scans/<scan_id>/    # meta.json、result.json、worker.log
     ├── reports/            # JSON / HTML 报告
