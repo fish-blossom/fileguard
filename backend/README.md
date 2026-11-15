@@ -101,7 +101,7 @@ fg scan /path/to/file --lang zh
 fg --version
 ```
 
-安装源只用 GitHub Release（`https://github.com/fish-blossom/fileguard/releases/latest/download/`）：`manifest.json` + `manifest.json.sig`（发布密钥签名）+ `fileguard.tar.gz`，以及 GitHub Actions 生成的 SLSA 构建证明。`install.sh` 先用已安装副本里固定的公钥（首次安装用下载包自带的公钥）验证 manifest 签名，再核对 tarball 的 SHA-256，这两步是必做的，不依赖 `gh`。如果本机有 `gh`，还会运行 `gh attestation verify --repo fish-blossom/fileguard`，证明缺失或无效就拒绝安装；没有 `gh` 则跳过构建证明，只靠签名和哈希。都通过才解压。更新先在 `.stage/` 里建好新代码、venv 和工具并自检，再整体替换，失败自动回滚；旧版本目录 `.prev-*` 留到下次安装时清理。发布由 `.github/workflows/release.yml` 在版本标签上调用 `scripts/build_release.sh`（基于 `git archive`，可复现）并附加构建证明。
+安装源只用 GitHub Release（`https://github.com/fish-blossom/fileguard/releases/latest/download/`）：`manifest.json` + `manifest.json.sig`（发布密钥签名）+ `fileguard.tar.gz`，以及 GitHub Actions 生成的 SLSA 构建证明。`install.sh` 先用已安装副本里固定的公钥（首次安装用下载包自带的公钥）验证 manifest 签名，再核对 tarball 的 SHA-256，这两步是必做的，不依赖 `gh`。如果本机有 `gh`，还会运行 `gh attestation verify --repo fish-blossom/fileguard`，证明缺失或无效就拒绝安装；没有 `gh` 则跳过构建证明，只靠签名和哈希。都通过才解压。更新先在 `.stage/` 里建好新代码、venv 和工具并自检，再整体替换，失败自动回滚；旧版本目录 `.prev-*` 留到下次安装时清理。安装锁（`data/.install.lock` 上的 flock）只由外层安装进程持有，clamd 等长期子进程启动时会关掉继承的描述符；0.5.2 及更早版本的安装会把锁泄漏给 clamd，0.5.3 起的安装脚本发现锁只被本目录自己的 clamd 占用时，会重启这个 clamd 再继续（别的进程占锁仍返回 busy）。发布由 `.github/workflows/release.yml` 在版本标签上调用 `scripts/build_release.sh`（基于 `git archive`，可复现）并附加构建证明。
 
 对用户只在**第一次安装**时说一句「⚙️ 正在初始化 FileGuard，预计约 N 分钟」，完成后（含静默的 left-pad 验证）再说「✅ 初始化完成，可以开始检测了」。已经是最新版或后台更新时，什么都不要说；更新失败就继续用旧版本，只有引擎无法使用时才告知用户。不要列举安装了哪些组件。
 

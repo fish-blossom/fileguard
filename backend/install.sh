@@ -187,8 +187,56 @@ extract_and_reexec() {   # $1 verified tarball
   mkdir -p "$TMP/x"
   tar -xzf "$1" -C "$TMP/x" --no-same-owner
   [ -f "$TMP/x/fileguard/install.sh" ] || { log "release tarball has no fileguard/install.sh"; return 1; }
-  FILEGUARD_DATA="$DATA" bash "$TMP/x/fileguard/install.sh" --from-tree --verified --dir "$DIR"
+  # 9>&-: the inner installer starts clamd; it must not inherit the install lock fd.
+  FILEGUARD_DATA="$DATA" bash "$TMP/x/fileguard/install.sh" --from-tree --verified --dir "$DIR" 9>&-
 }
+
+# ---------- install lock ----------
+# The lock is an flock on $DATA/.install.lock held on fd 9 by the outer installer only.
+# Long-lived children (clamd) must never inherit fd 9, or the lock outlives the installer
+# and every later update reports "busy". Installers <= 0.5.2 leaked it into clamd; when the
+# lock is held ONLY by this install's own clamd, stop that clamd, take the lock, and start
+# clamd again without the fd. Any other holder means a real install is running.
+lock_holders() {  # pids that have the lock file open
+  local lf="$1" p fd
+  for p in /proc/[0-9]*; do
+    for fd in "$p"/fd/*; do
+      [ "$(readlink "$fd" 2>/dev/null)" = "$lf" ] && { echo "${p#/proc/}"; break; }
+    done
+  done 2>/dev/null
+}
+is_own_clamd() {  # pid -> 0 only for the clamd of THIS install dir
+  # Must be a clamd binary AND either this install's pinned build or the pid recorded in
+  # this install's run/clamd.pid (clamd chdirs to /, so cwd cannot be used).
+  local pid="$1" exe
+  exe="$(readlink "/proc/$pid/exe" 2>/dev/null)" || return 1
+  case "$exe" in */clamd) ;; *) return 1 ;; esac
+  [ "$exe" = "$DIR/vendor/clamav/sbin/clamd" ] && return 0
+  [ -f "$DIR/run/clamd.pid" ] && [ "$(tr -d ' \n' < "$DIR/run/clamd.pid")" = "$pid" ] && return 0
+  return 1
+}
+take_lock() {
+  mkdir -p "$DATA"
+  exec 9>"$DATA/.install.lock"
+  flock -n 9 && return 0
+  # Close our own fd before looking, so only foreign holders are listed.
+  exec 9>&-
+  local lf pids p
+  lf="$(realpath -m "$DATA/.install.lock")"
+  pids="$(lock_holders "$lf")"
+  [ -n "$pids" ] || { exec 9>"$DATA/.install.lock"; flock -n 9; return; }
+  for p in $pids; do is_own_clamd "$p" || return 1; done
+  log "install lock held only by this install's clamd (old installer fd leak); restarting clamd"
+  for p in $pids; do kill -TERM "$p" 2>/dev/null || true; done
+  for _ in $(seq 1 30); do
+    exec 9>"$DATA/.install.lock"
+    flock -n 9 && { RESTART_CLAMD=1; return 0; }
+    exec 9>&-
+    sleep 1
+  done
+  return 1
+}
+RESTART_CLAMD=0
 
 emit() {  # action version ok usable rolled_back [missing...]
   python3 - "$@" << 'PY'
@@ -280,14 +328,15 @@ fi
 
 # ---------- outer modes: obtain a verified release, then re-exec its installer ----------
 if [ "$FROM_TREE" -eq 0 ]; then
-  mkdir -p "$DATA"
-  exec 9>"$DATA/.install.lock"
-  if ! flock -n 9; then log "another FileGuard install/update is running"; emit busy "$(installed_version)" "$DIR" "$DATA" 1 "$(fg_usable && echo 1 || echo 0)" 0; exit 0; fi
+  if ! take_lock; then log "another FileGuard install/update is running"; emit busy "$(installed_version)" "$DIR" "$DATA" 1 "$(fg_usable && echo 1 || echo 0)" 0; exit 0; fi
+  if [ "$RESTART_CLAMD" = 1 ] && [ -x "$DIR/scripts/start_clamd.sh" ]; then
+    FILEGUARD_DATA="$DATA" bash "$DIR/scripts/start_clamd.sh" 9>&- >/dev/null 2>&1 || log "clamd restart failed (scans fall back to clamscan)"
+  fi
   OLD="$(installed_version)"
   if [ "$MODE" = "auto" ]; then
     # daily ClamAV signature refresh (cheap no-op when fresh)
     if engine_present && [ -x "$DIR/scripts/update_clamav_db.sh" ]; then
-      FILEGUARD_DATA="$DATA" bash "$DIR/scripts/update_clamav_db.sh" --if-older-than 24 >/dev/null 2>&1 || true
+      FILEGUARD_DATA="$DATA" bash "$DIR/scripts/update_clamav_db.sh" --if-older-than 24 9>&- >/dev/null 2>&1 || true
     fi
     if engine_present && ! check_due; then
       emit up_to_date "$OLD" "$DIR" "$DATA" 1 "$(fg_usable && echo 1 || echo 0)" 0; exit 0
@@ -341,6 +390,7 @@ fi
 # (--verified) or explicitly for development.
 # =====================================================================================
 set +e
+exec 9>&- 2>/dev/null   # never let clamd (started below) inherit an outer installer's lock fd
 [ "$VERIFIED" -eq 1 ] || log "WARNING: installing an unverified source tree (development mode)"
 NEW_VER="$(head -n1 "$SRC_DIR/VERSION" | tr -d ' \t\r')"
 OLD_VER="$(installed_version)"
@@ -516,8 +566,8 @@ os.replace(tmp, p)
 PY
 
 # ---- 8. signatures + clamd ----
-FILEGUARD_DATA="$DATA" bash "$DIR/scripts/update_clamav_db.sh" --if-older-than 24 >&2 || log "signature update failed (continuing)"
-FILEGUARD_DATA="$DATA" bash "$DIR/scripts/start_clamd.sh" >&2 || log "clamd not started (clamscan fallback)"
+FILEGUARD_DATA="$DATA" bash "$DIR/scripts/update_clamav_db.sh" --if-older-than 24 9>&- >&2 || log "signature update failed (continuing)"
+FILEGUARD_DATA="$DATA" bash "$DIR/scripts/start_clamd.sh" 9>&- >&2 || log "clamd not started (clamscan fallback)"
 
 # ---- 9. PATH entry: only the default install owns /usr/local/bin/fg ----
 if [ "$DIR" = "/workspace/fileguard" ]; then

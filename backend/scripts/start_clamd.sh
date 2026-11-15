@@ -48,7 +48,15 @@ if [ ! -x "$CLAMD" ]; then
   exit 1
 fi
 rm -f "$SOCK"
-"$CLAMD" --config-file="$CONF"
+# Start clamd with only stdin/stdout/stderr: it is long-lived and must not keep any
+# inherited descriptor open (e.g. an installer's lock fd, which would block later updates).
+(
+  for fd in /proc/self/fd/*; do
+    n="${fd##*/}"
+    case "$n" in 0|1|2) ;; *) eval "exec $n>&-" 2>/dev/null ;; esac
+  done
+  exec "$CLAMD" --config-file="$CONF"
+)
 for i in $(seq 1 120); do
   if "$CLAMDSCAN" --config-file="$CONF" --ping 1 >/dev/null 2>&1; then echo "clamd ready"; exit 0; fi
   sleep 1
