@@ -362,6 +362,8 @@ def _s3_static(ctx, sample, work, prog):
         yara_hits[item["rel"]] = hits
         for hh in hits:
             ctx.add(hh["severity"], "S3", f"YARA:{hh['rule']}", hh["zh"], hh["en"], item["rel"], (hh["strings"] or [""])[0])
+            for extra in (hh.get("instances") or [])[1:]:
+                ctx.add(hh["severity"], "S3", f"YARA:{hh['rule']}", hh["zh"], hh["en"], item["rel"], extra)
         with open(item["abs"], "rb") as fh:
             item["sha256"] = hashlib.sha256(fh.read()).hexdigest()
         if item["depth"] > 0 and not item.get("container"):

@@ -36,8 +36,8 @@ def build_report(ctx, verdict, error, reused, elapsed):
         rep["cache_stats"] = dict(rep.get("cache_stats", {}), file_hash_cache_hit=True)
         rep["coverage"]["S2"] = {"status": "done", "zh": "SHA-256 命中缓存，复用之前完整检测的结果", "en": "SHA-256 cache hit; reused a prior complete scan"}
         return rep
-    ctx.stage("S7", "done", "已生成报告、Hash 校验命令；样本已删除，仅保留报告与 Hash",
-              "Report and hash-verification commands generated; sample deleted, only report + hashes kept")
+    ctx.stage("S7", "done", "已生成报告、Hash 校验命令；引擎内的样本副本已删除，仅保留报告与 Hash",
+              "Report and hash-verification commands generated; the engine's sample copy was deleted, only report + hashes kept")
     for s in STAGES:
         if s not in ctx.stages:
             ctx.stages[s] = {"status": "not_run", "zh": "因检测提前终止未执行", "en": "Not run because the scan stopped early"}
@@ -248,7 +248,7 @@ def render_markdown(rep, lang="zh", confirmations=None):
     if rep.get("error"):
         out.append(f"\n**ERROR:** `{rep['error']['code']}` {t(rep['error'])}")
     out.append(f"\n> {DISCLAIMER['zh' if zh else 'en']}")
-    out.append(L("\n> 样本已在扫描后删除，仅保留报告与 Hash。", "\n> The sample was deleted after scanning; only the report and hashes are kept."))
+    out.append(L("\n> 引擎内的样本副本已在扫描后删除，仅保留报告与 Hash；提交的原文件不会被引擎改动或删除。", "\n> The engine's copy of the sample was deleted after scanning; only the report and hashes are kept. The submitted original file is never modified or deleted by the engine."))
     return "\n".join(out)
 
 
@@ -951,8 +951,8 @@ def render_html(rep, lang="zh", confirmations=None):
         err_html = f'<p class="error-line"><strong>ERROR:</strong> <span class="mono">{_esc(err.get("code"))}</span> {_esc(t(err))}</p>'
 
     disclaimer = DISCLAIMER["zh" if zh else "en"]
-    deleted = L("样本已在扫描后删除，仅保留报告与 Hash。",
-                "The sample was deleted after scanning; only the report and hashes are kept.")
+    deleted = L("引擎内的样本副本已在扫描后删除，仅保留报告与 Hash；提交的原文件不会被引擎改动或删除。",
+                "The engine's copy of the sample was deleted after scanning; only the report and hashes are kept. The submitted original file is never modified or deleted by the engine.")
 
     css = _HTML_CSS
     short = _short_sha(sha) if sha != "N/A" else na

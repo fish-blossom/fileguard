@@ -16,6 +16,8 @@ URL_RE = re.compile(rb"https?://[A-Za-z0-9.\-]{3,253}(?::\d+)?(?:/[^\s\"'<>`)]{0
 IP_RE = re.compile(rb"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b")
 B64_RE = re.compile(rb"[A-Za-z0-9+/]{200,}={0,2}")
 EVAL_RE = re.compile(rb"\b(eval|exec|Function|execSync|spawn|os\.system|subprocess|Invoke-Expression|IEX)\s*\(")
+PDF_URI_RE = re.compile(rb"/URI\s*\(((?:[^()\\]|\\.){1,400})\)")
+PDF_IP_HOST_RE = re.compile(rb"^[a-z][a-z0-9+.\-]*://(?:[^/@\s]*@)?(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?::\d+)?(?:[/?#]|$)", re.I)
 SCRIPT_EXT = {"nsi", "iss", "js", "cjs", "mjs", "ts", "py", "sh", "bash", "ps1", "psm1", "bat", "cmd", "vbs", "php", "pl", "rb", "pth", "hta"}
 BENIGN_HOSTS = (b"github.com", b"npmjs.org", b"npmjs.com", b"pypi.org", b"python.org", b"w3.org", b"mozilla.org",
                 b"apache.org", b"opensource.org", b"schemas.", b"example.com", b"localhost", b"googleapis.com",
@@ -512,6 +514,16 @@ class Analyzer:
             self.ctx.add("high", "S3", "PDF_LAUNCH", "PDF 含 /Launch 动作（可启动外部程序）", "PDF contains /Launch action (can start programs)", rel)
         if (keys["/JavaScript"] or keys["/JS"]) and (keys["/OpenAction"] or keys["/AA"]):
             self.ctx.add("medium", "S3", "PDF_AUTO_JS", "PDF 打开时自动执行 JavaScript", "PDF auto-runs JavaScript on open", rel)
+        # link targets: /URI (...) actions are network indicators; a link straight to a bare IP is reported
+        for m in PDF_URI_RE.finditer(data):
+            uri = m.group(1).strip()[:200]
+            if not uri or any(b in uri for b in BENIGN_HOSTS):
+                continue
+            self.network.add(uri.decode("latin-1"))
+            h = PDF_IP_HOST_RE.match(uri)
+            if h:
+                self.ctx.add("low", "S3", "PDF_URI_BARE_IP", f"PDF 链接直接指向裸 IP 地址：{uri.decode('latin-1')[:100]}",
+                             f"PDF link points straight to a bare IP address: {uri.decode('latin-1')[:100]}", rel, uri.decode("latin-1")[:100])
         if b"/ObjStm" in data and not active:
             self.ctx.limit("PDF 使用压缩对象流（ObjStm），关键字统计可能不完整", "PDF uses object streams (ObjStm); keyword counts may be incomplete")
         if active:

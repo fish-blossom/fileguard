@@ -201,9 +201,19 @@ def yara_scan(path, display_name):
         for s in m.strings[:3]:
             for inst in s.instances[:1]:
                 snippets.append(inst.matched_data[:80].decode("latin-1", "replace"))
+        # single-pattern rules (e.g. FG_Webshell_PHP): each distinct matched text is separate evidence
+        # (`assert($_COOKIE` and `eval($_POST` are two independent sinks, not one)
+        distinct = []
+        if len(m.strings) == 1:
+            for inst in m.strings[0].instances[:20]:
+                d = inst.matched_data[:80].decode("latin-1", "replace")
+                if d not in distinct:
+                    distinct.append(d)
+                if len(distinct) >= 3:
+                    break
         out.append({"rule": m.rule, "severity": m.meta.get("severity", "medium"),
                     "zh": m.meta.get("desc_zh", m.rule), "en": m.meta.get("desc_en", m.rule),
-                    "strings": snippets})
+                    "strings": snippets, "instances": distinct})
     return out
 
 

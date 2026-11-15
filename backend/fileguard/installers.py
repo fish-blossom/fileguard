@@ -16,6 +16,7 @@ UNCOMMON_BACKENDS_OK = ("setuptools.build_meta", "poetry.core.masonry.api", "poe
                         "hatchling.build", "pdm.backend", "pdm.pep517.api", "maturin", "scikit_build_core.build",
                         "mesonpy", "setuptools.build_meta:__legacy__", "sipbuild.api", "jupyter_packaging.build_api",
                         "whey", "enscons.api", "pbr.build")
+DEB_CONTROL_DATA = {"conffiles", "md5sums", "sha256sums", "shlibs", "symbols", "templates", "control", "triggers", "clilibs", "starlibs"}
 RTLO = "\u202e"
 EXEC_EXT = {"exe", "scr", "com", "bat", "cmd", "pif", "vbs", "js", "jse", "wsf", "hta", "lnk", "ps1", "msi", "jar", "dll", "cpl"}
 DECOY_EXT = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png", "gif", "txt", "mp4", "mp3", "zip", "rar", "csv"}
@@ -38,6 +39,7 @@ PERSIST_WRITE = [
     (rb">>?\s*/etc/sudoers|/etc/sudoers\.d/", "修改 sudoers 提权配置", "modifies sudoers", "high"),
     (rb"/etc/ld\.so\.preload", "写 /etc/ld.so.preload（全局库劫持）", "touches /etc/ld.so.preload (global library hijack)", "high"),
     (rb"(copy|cp|Copy-Item)\s+[^\n]{0,120}(powershell|cmd|wscript|cscript|mshta)\.exe[^\n]{0,120}\.exe", "把系统程序复制成其他名字（伪装 LOLBin）", "copies a system binary under another name (LOLBin masquerade)", "high"),
+    (rb"(CopyFile|CopyHere|\bcopy\b|xcopy|Copy-Item|\bmove\b|Move-Item)[^\n]{0,300}(Start Menu[\\/]Programs[\\/]Startup|shell:startup|\\Startup\\)", "把文件复制到 Windows 启动文件夹（开机自启动）", "copies a file into the Windows Startup folder (runs at logon)", "low"),
     (rb"/Library/Caches/com\.apple\.|/Library/LaunchDaemons/com\.apple\.|\\Windows\\Temp\\svchost\.exe|%APPDATA%\\[^\n]{0,30}svchost", "伪装成系统组件的落地路径", "drop path masquerading as a system component", "medium"),
 ]
 ENV_TOKENS = rb"\b(GITHUB_TOKEN|GH_TOKEN|NPM_TOKEN|NODE_AUTH_TOKEN|AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID|AWS_SESSION_TOKEN|PYPI_TOKEN|TWINE_PASSWORD|AZURE_CLIENT_SECRET|GOOGLE_APPLICATION_CREDENTIALS|SLACK_TOKEN|OPENAI_API_KEY)\b"
@@ -67,6 +69,8 @@ def name_checks(ctx, rel, mime, desc):
 def text_checks(ctx, an, rel, name, ext, data):
     script = ext in ("js", "cjs", "mjs", "ts", "py", "sh", "bash", "ps1", "psm1", "bat", "cmd", "vbs", "php", "pl", "rb", "nsi", "iss", "") \
         or name in ("postinst", "preinst", "postrm", "prerm", "config")
+    if name in DEB_CONTROL_DATA and "!/control.tar" in rel:
+        script = False        # Debian control metadata (path lists / checksums), not code
     if not script:
         return
     for pat, zh, en in SEC_DISABLE:
@@ -89,11 +93,18 @@ def text_checks(ctx, an, rel, name, ext, data):
         sev = "high" if net and len(toks) >= 2 else "low"
         ctx.add(sev, "S3", "ENV_TOKEN_ACCESS", f"读取环境变量中的凭据令牌：{', '.join(t.decode() for t in sorted(toks))}" + ("，且具备外发能力" if sev == "high" else ""),
                 f"Reads credential tokens from environment: {', '.join(t.decode() for t in sorted(toks))}" + (" with network egress" if sev == "high" else ""), rel)
-    m = re.search(LOLBIN_DL, data, re.I)
-    if m:
+    seen_tools = set()
+    for m in re.finditer(LOLBIN_DL, data, re.I):
+        # one finding per distinct tool (certutil, bitsadmin, ...), so each download method is its own evidence
+        tool = re.match(rb"[A-Za-z\-]+", m.group(0)).group(0).lower()
+        if tool in seen_tools:
+            continue
+        seen_tools.add(tool)
         sev = "high" if re.search(EXEC_AFTER, data[m.end(): m.end() + 600], re.I) else "medium"
-        ctx.add(sev, "S3", "LOLBIN_DOWNLOAD", "使用系统工具下载文件" + ("并随后执行" if sev == "high" else ""),
-                "Uses a living-off-the-land tool to download" + (" then execute" if sev == "high" else ""), rel, m.group(0)[:80].decode("latin-1"))
+        ctx.add(sev, "S3", "LOLBIN_DOWNLOAD", f"使用系统工具 {tool.decode()} 下载文件" + ("并随后执行" if sev == "high" else ""),
+                f"Uses the living-off-the-land tool {tool.decode()} to download" + (" then execute" if sev == "high" else ""), rel, m.group(0)[:80].decode("latin-1"))
+        if len(seen_tools) >= 6:
+            break
     if ext in ("ps1", "psm1", "bat", "cmd", "vbs", "js"):
         flags = [f for f in (rb"-ExecutionPolicy\s+Bypass|-ep\s+bypass", rb"-WindowStyle\s+Hidden|-w\s+hidden", rb"-EncodedCommand|-enc\s") if re.search(f, data, re.I)]
         if len(flags) >= 2:
@@ -221,9 +232,8 @@ def msi_checks(ctx, path, rel):
     for t in ("CustomAction", "Registry", "ServiceInstall", "ScheduledTask", "InstallExecuteSequence"):
         if t in tables:
             out += f"\n### {t}\n" + tools.run_limited(["msiinfo", "export", path, t], capture_output=True, text=True, timeout=60, errors="replace").stdout
-    ca = re.findall(r"^([^\t\n]+)\t(\d+)\t([^\t\n]*)\t([^\n]*)$", out.split("### Registry")[0], re.M)
-    for name, typ, src, target in ca[3:]:
-        base = int(typ) & 0x3F if typ.isdigit() else 0
+    for name, typ, src, target in msi_custom_actions(out):
+        base = int(typ) & 0x3F
         kind = {1: "DLL", 2: "EXE", 5: "JScript", 6: "VBScript", 18: "EXE", 34: "EXE", 37: "JScript", 38: "VBScript", 50: "EXE"}.get(base)
         if kind:
             sev = "medium" if kind in ("JScript", "VBScript") or re.search(r"powershell|cmd|http", target, re.I) else "low"
@@ -235,6 +245,24 @@ def msi_checks(ctx, path, rel):
     if "ServiceInstall" in tables:
         ctx.footprint.append({"kind": "predicted", "zh": "MSI 安装 Windows 服务", "en": "MSI installs a Windows service"})
     return out
+
+
+def msi_custom_actions(out):
+    """Rows of the `### CustomAction` section of msi_checks output as (name, type, source, target).
+    `msiinfo export` prints 3 header lines (column names, column types, table name + key) before the
+    rows; those never have a numeric Type column, so every row with a numeric Type is a real action."""
+    m = re.search(r"^### CustomAction\n(.*?)(?=^### |\Z)", out, re.M | re.S)
+    if not m:
+        return []
+    rows = []
+    for line in m.group(1).splitlines():
+        cols = line.rstrip("\r").split("\t")
+        if len(cols) < 4 or not cols[1].strip().isdigit():
+            continue
+        if cols[0] == "Action" and cols[1] == "Type":
+            continue
+        rows.append((cols[0], cols[1].strip(), cols[2], cols[3].strip()))
+    return rows
 
 
 def pe_installer_kind(path):

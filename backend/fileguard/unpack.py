@@ -45,6 +45,8 @@ def sniff(path):
         return "xz"
     if head[:8] == b"!<arch>\n":
         return "ar"      # .deb
+    if head[:4] == b"\x28\xb5\x2f\xfd":
+        return "zst"     # e.g. control.tar.zst / data.tar.zst inside modern .deb files
     if head[:4] == b"\xed\xab\xee\xdb":
         return "rpm"
     if head[:2] == b"MZ":
@@ -77,6 +79,7 @@ class Unpacker:
         self.inventory = []   # list of dict(rel, abs, size, depth, parent, container)
         self._n = 0
         self.stats = {"archives_unpacked": 0, "archives_failed": 0, "entries_skipped": 0}
+        self._kinds = {}      # rel -> container kind, for context (e.g. "is this tar a .deb payload?")
 
     # ---- helpers -------------------------------------------------------
     def _newdir(self):
@@ -137,6 +140,7 @@ class Unpacker:
             if not kind:
                 continue
             item["container"] = kind
+            self._kinds[item["rel"]] = kind
             if item["depth"] >= config.MAX_UNPACK_DEPTH:
                 self.ctx.miss("S3", "UNPACK_DEPTH_LIMIT",
                               f"嵌套压缩超过 {config.MAX_UNPACK_DEPTH} 层，内层内容未检测",
@@ -218,8 +222,18 @@ class Unpacker:
                 self.total += n
                 self._register(dst, rel, item["depth"] + 1, rel0, None)
 
+    def _deb_payload(self, rel):
+        """True if `rel` is (a decompressed form of) the data.tar member of a .deb. dpkg installs that
+        payload relative to /, so absolute symlink targets there are normal, not an archive escape."""
+        parts = rel.split("!/")
+        for i in range(len(parts) - 1):
+            if self._kinds.get("!/".join(parts[: i + 1])) == "ar":
+                return parts[i + 1].startswith("data.tar") and all("data.tar" in p for p in parts[i + 1:])
+        return False
+
     def _x_tar(self, item):
         rel0 = item["rel"]
+        deb_payload = self._deb_payload(rel0)
         try:
             tf = tarfile.open(item["abs"], mode="r:*")
         except (tarfile.TarError, OSError, EOFError, lzma.LZMAError) as e:
@@ -235,6 +249,8 @@ class Unpacker:
                                      f"Tar entry uses path traversal: {name}", rel0, name)
                     if m.issym() or m.islnk():
                         target = m.linkname
+                        if deb_payload and m.issym() and target.startswith("/") and not _bad_name(name):
+                            continue
                         if _link_escapes(name, target, m.islnk()):
                             self.ctx.add("high", "S3", "ARCHIVE_LINK_ESCAPE", f"tar 链接指向包外：{name} -> {target}",
                                          f"Tar link points outside archive: {name} -> {target}", rel0, f"{name} -> {target}")
@@ -302,7 +318,7 @@ class Unpacker:
     def _x_xz(self, item):
         return self._single_stream(item, lzma.open)
 
-    # 7z / rar / ar(deb) / rpm via the 7z CLI (list first, then extract with limits)
+    # 7z / rar / rpm / zstd via the 7z CLI (ar/.deb is parsed in Python, see _x_ar) (list first, then extract with limits)
     def _x_7z(self, item):
         return self._via_7z(item)
 
@@ -310,6 +326,41 @@ class Unpacker:
         return self._via_7z(item)
 
     def _x_ar(self, item):
+        """Unix ar (.deb) parsed in Python. 7-Zip treats a .deb as a single package and only exposes
+        data.tar, hiding control.tar.* (maintainer scripts), so it must not be used here."""
+        rel0 = item["rel"]
+        try:
+            members = list(_ar_members(item["abs"]))
+        except (OSError, ValueError) as e:
+            raise _Corrupt(f"ar: {e}"[:120])
+        declared = sum(size for _, _, size in members)
+        if declared > self._budget_left():
+            csize = os.path.getsize(item["abs"]) or 1
+            self._over_budget(rel0, declared, declared / csize)
+            return
+        d = self._newdir()
+        with open(item["abs"], "rb") as f:
+            for name, offset, size in members:
+                rel = f"{rel0}!/{name}"
+                if _bad_name(name):
+                    self.ctx.add("high", "S3", "ARCHIVE_PATH_TRAVERSAL", f"ar 条目包含路径穿越：{name}",
+                                 f"ar entry uses path traversal: {name}", rel0, name)
+                if not self._count_ok(rel):
+                    return
+                left = self._budget_left()
+                if size > left:
+                    self._over_budget(rel)
+                    return
+                dst = d / f"{len(self.inventory):06d}_{Path(_safe_rel(name)).name[:120]}"
+                f.seek(offset)
+                n, _ = self._copy_stream(_Bounded(f, size), dst, size)
+                if n != size:
+                    dst.unlink(missing_ok=True)
+                    raise _Corrupt(f"ar member {name} truncated")
+                self.total += n
+                self._register(dst, rel, item["depth"] + 1, rel0, None)
+
+    def _x_zst(self, item):
         return self._via_7z(item)
 
     def _x_rpm(self, item):
@@ -405,6 +456,75 @@ class Unpacker:
 
 class _Corrupt(Exception):
     pass
+
+
+class _Bounded:
+    """Read at most `left` bytes from an already positioned file object."""
+
+    def __init__(self, f, left):
+        self.f, self.left = f, left
+
+    def read(self, n=-1):
+        if self.left <= 0:
+            return b""
+        n = self.left if n is None or n < 0 else min(n, self.left)
+        b = self.f.read(n)
+        self.left -= len(b)
+        return b
+
+
+def _ar_members(path):
+    """Yield (name, data_offset, size) for every regular member of a System V / GNU / BSD ar archive.
+    Symbol tables ("/", "/SYM64/", "__.SYMDEF") are skipped; GNU "//" long names and BSD "#1/N" are resolved."""
+    size_total = os.path.getsize(path)
+    longnames = b""
+    with open(path, "rb") as f:
+        if f.read(8) != b"!<arch>\n":
+            raise ValueError("bad ar magic")
+        pos = 8
+        while pos < size_total:
+            if pos % 2:
+                pos += 1
+                if pos >= size_total:
+                    break
+            f.seek(pos)
+            hdr = f.read(60)
+            if len(hdr) < 60:
+                if hdr.strip(b"\n") == b"":
+                    break
+                raise ValueError("truncated ar header")
+            if hdr[58:60] != b"`\n":
+                raise ValueError("bad ar header terminator")
+            raw = hdr[:16].decode("latin-1").rstrip(" ")
+            try:
+                size = int(hdr[48:58].decode("ascii").strip() or "0")
+            except ValueError:
+                raise ValueError("bad ar member size")
+            if size < 0 or pos + 60 + size > size_total:
+                raise ValueError("ar member exceeds file size")
+            data_off = pos + 60
+            pos = data_off + size
+            if raw in ("/", "/SYM64/") or raw.startswith("__.SYMDEF"):
+                continue
+            if raw == "//":
+                f.seek(data_off)
+                longnames = f.read(size)
+                continue
+            if raw.startswith("#1/"):
+                nlen = int(raw[3:] or "0")
+                if nlen < 0 or nlen > size:
+                    raise ValueError("bad BSD ar name length")
+                f.seek(data_off)
+                name = f.read(nlen).rstrip(b"\0").decode("utf-8", "replace")
+                data_off += nlen
+                size -= nlen
+            elif raw.startswith("/") and raw[1:].isdigit():
+                off = int(raw[1:])
+                end = longnames.find(b"/\n", off)
+                name = longnames[off: end if end >= 0 else None].decode("utf-8", "replace")
+            else:
+                name = raw[:-1] if raw.endswith("/") else raw
+            yield name or "unnamed", data_off, size
 
 
 def zlib_error():
