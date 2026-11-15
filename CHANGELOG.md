@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **clamd no longer keeps running from an old `.prev-*` tree.** An update moves the old tree (including `vendor/`) to `.prev-<ts>`, so a running clamd's binary ends up there, and is deleted by the next install. `start_clamd.sh` only compared versions, so after a same-version ClamAV update clamd was never restarted. It now also restarts this install's clamd when its binary is not the current `vendor/clamav/sbin/clamd` (graceful SIGTERM, SIGKILL only after 30 s). Only a clamd verified as this install's own is ever stopped: its pid is the one in `run/clamd.pid` AND its binary is this install's vendor clamd (current tree, `.prev-<ts>`, or deleted). The install-lock self-heal in `install.sh` and `bootstrap.sh` uses the same check, so it no longer treats a clamd from outside the install dir as its own.
+
 ## 0.5.8 (2026-11-15)
 
 - **`FILEGUARD_NO_SHARED_CLAMD=1` is honoured by the scanner.** A second install (any `--dir` other than `/workspace/fileguard`) reuses the default install's running clamd. `start_clamd.sh` already respected the opt-out, but the scanner still picked the shared clamd before trying to start its own, so the opt-out never took effect. Found in the v0.5.7 fresh-install test.

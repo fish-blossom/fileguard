@@ -106,9 +106,17 @@ lock_holders() {
     done
   done 2>/dev/null
 }
-own_clamd() {
-  local exe; exe="$(readlink "/proc/$1/exe" 2>/dev/null)" || return 1
-  case "$exe" in "$DIR"/*/clamd|"$DIR"/*"/clamd (deleted)") return 0 ;; */clamd|*"/clamd (deleted)") ;; *) return 1 ;; esac
+own_clamd() {  # pid -> 0 only for THIS install's clamd: pid in run/clamd.pid AND this install's
+  # vendor clamd binary (current tree, an old .prev-<ts> tree, or the " (deleted)" variant)
+  local exe ts; exe="$(readlink "/proc/$1/exe" 2>/dev/null)" || return 1
+  exe="${exe% (deleted)}"
+  case "$exe" in
+    "$DIR/vendor/clamav/sbin/clamd") ;;
+    "$DIR"/.prev-*/vendor/clamav/sbin/clamd)
+      ts="${exe#"$DIR"/.prev-}"; ts="${ts%/vendor/clamav/sbin/clamd}"
+      case "$ts" in ''|*[!0-9]*) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
   [ -f "$DIR/run/clamd.pid" ] && [ "$(tr -d ' \n' < "$DIR/run/clamd.pid")" = "$1" ]
 }
 exec 9>"$DATA/.install.lock"
