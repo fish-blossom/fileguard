@@ -2,7 +2,7 @@
 
 FileGuard is a **static** malware and software supply-chain poisoning scanner made to run with a [Grok Bot](https://grok.com). It inspects files, download URLs, and npm/PyPI packages for malicious code, suspicious install hooks, and known compromise patterns (including the 2026-03 Axios incident). It **never executes, installs, or runs macros**. There is no server, no port forwarding, and no MCP.
 
-When someone adds the FileGuard bot from a template, the first conversation installs the engine onto **that user’s own Linux box** (Debian/Ubuntu, typically user `box`, `/workspace` writable). Later conversations update it silently if a newer version is on `main`.
+When someone adds the FileGuard bot from a template, the first conversation installs the engine onto **that user’s own Linux box** (Debian/Ubuntu, typically user `box`, `/workspace` writable). Later conversations update it silently when a newer signed GitHub Release is published.
 
 中文简介：FileGuard 是一个只做静态分析的恶意文件 / 供应链投毒检测助手。检测在用户自己的 box 上用 CLI `fg` 完成本地扫描；结论只有 BLOCK、HIGH_RISK、INCOMPLETE、NO_FINDINGS、ERROR 五种。
 
@@ -14,17 +14,21 @@ fileguard/
 ├── profile.json              Bot name, title, and operating description
 ├── system-instructions.md    Full rules: limits, five verdicts, report format
 ├── memory/profile.md         Standing rules for the bot
+├── LICENSE                   PolyForm Strict License 1.0.0
+├── SECURITY.md               How to report a vulnerability; how releases are signed
 ├── skills/
 │   ├── fileguard-scan/       Two-command scan flow and how to format the three result messages
 │   └── getting-started/      First-conversation install / later silent updates
 ├── backend/                  Engine installed to /workspace/fileguard on the user’s box
-│   ├── install.sh            Idempotent install/update (`--estimate`, `--tarball`, `--dir`)
-│   ├── VERSION               Published engine version (used for silent update checks)
+│   ├── install.sh            Verified install/update (`--estimate`, `--auto`, `--tarball`, `--dir`)
+│   ├── VERSION               Engine version (semver)
+│   ├── release-signers       Pinned public key that signs release manifests
+│   ├── requirements.lock     Hash-locked Python dependencies (wheels only)
 │   ├── fileguard/            Python engine (CLI, pipeline S0–S7, file store; no database)
 │   ├── intel/                Local threat intel (known-bad hashes, malicious packages, IOCs)
 │   ├── rules/fileguard.yar   YARA rules
 │   ├── clamav/clamd.conf.in  clamd config template
-│   ├── scripts/              fg, env.sh, start_clamd.sh
+│   ├── scripts/              fg, env.sh, start_clamd.sh, update_clamav_db.sh, build_release.sh
 │   └── requirements.txt
 └── docs/
     ├── detection-checklist.md
@@ -32,32 +36,31 @@ fileguard/
     └── sample-reports/       Illustrative reports (no EICAR test-file reports)
 ```
 
-This repository does **not** include tests, sample malware fixtures, virtualenvs, scan data, or a LICENSE file (none was present in the original package).
+This repository does **not** include tests, sample malware fixtures, virtualenvs, or scan data.
 
 ## How the bot installs the engine
 
-Source of truth is this GitHub repo’s `main` branch (auto archive, not a Release asset):
+Installs come only from **signed GitHub Releases**, never from the moving `main` branch:
 
-- Archive: `https://github.com/fish-blossom/fileguard/archive/refs/heads/main.tar.gz`  
-  Unpacks as `fileguard-main/backend/`.
-- Or: `git clone https://github.com/fish-blossom/fileguard.git`
-- Version pin for updates: `https://raw.githubusercontent.com/fish-blossom/fileguard/main/backend/VERSION`
+- `manifest.json` (version, commit, tarball SHA-256) + `manifest.json.sig` (signed with the key in `backend/release-signers`)
+- `fileguard.tar.gz` (unpacks as `fileguard/`) + `fileguard.tar.gz.sha256`
+- Latest: `https://github.com/fish-blossom/fileguard/releases/latest/download/<file>`
 
-Default env: `FILEGUARD_SOURCE_URL` and `FILEGUARD_SOURCE_VERSION_URL` point at those URLs. `install.sh --tarball` and `--dir` still work for local/testing installs.
+`install.sh` verifies the manifest signature and the tarball SHA-256 before extracting anything, compares versions as semver, and checks for a new release at most once every 24 hours.
 
-**First install** (when `/workspace/fileguard` does not exist). Download, extract, estimate, then install — do not pipe the script to bash:
+**First install** (when `/workspace/fileguard` does not exist). Download, verify, extract, estimate, then install — do not pipe a script to bash:
 
 ```bash
-TMP=$(mktemp -d /tmp/fileguard-src.XXXXXX)
-curl -fsSL https://github.com/fish-blossom/fileguard/archive/refs/heads/main.tar.gz -o "$TMP/src.tar.gz"
-tar -xzf "$TMP/src.tar.gz" -C "$TMP"
-SRC="$TMP/fileguard-main/backend"
-FILEGUARD_DIR=/workspace/fileguard bash "$SRC/install.sh" --estimate
+TMP=$(mktemp -d /tmp/fileguard-src.XXXXXX) && cd "$TMP"
+BASE=https://github.com/fish-blossom/fileguard/releases/latest/download
+curl -fsSLO "$BASE/fileguard.tar.gz" && curl -fsSLO "$BASE/fileguard.tar.gz.sha256"
+sha256sum -c fileguard.tar.gz.sha256 && tar -xzf fileguard.tar.gz
+FILEGUARD_DIR=/workspace/fileguard bash fileguard/install.sh --estimate
 # After the one-line init message to the user:
-FILEGUARD_DIR=/workspace/fileguard bash "$SRC/install.sh"
+FILEGUARD_DIR=/workspace/fileguard bash fileguard/install.sh --tarball "$TMP/fileguard.tar.gz"
 ```
 
-`install.sh` installs apt packages when sudo is available, creates a Python venv, tries `freshclam` (non-fatal), and puts `fg` on PATH. Scan data lives in `$FILEGUARD_DIR/data` (or `FILEGUARD_DATA`) and is kept across updates.
+`install.sh` installs a few apt packages when sudo is available, builds a Python venv from the hash-locked `requirements.lock`, installs pinned official 7-Zip and ClamAV builds (SHA-256 checked), keeps its own ClamAV signature database under `data/`, and puts `fg` on PATH. Scan data lives in `$FILEGUARD_DIR/data` (or `FILEGUARD_DATA`) and is kept across updates.
 
 ### What the bot says to the user
 
@@ -93,3 +96,9 @@ Do not attach an MCP server.
 - First install on a bare Debian/Ubuntu box usually takes a few minutes and apt steps need sudo.
 
 YARA rules include an EICAR test-string detector. Antivirus alerts on that rule file are expected.
+
+## License and security
+
+FileGuard is licensed under the [PolyForm Strict License 1.0.0](LICENSE): free for noncommercial use; no modification or redistribution. To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
+许可证：[PolyForm Strict 1.0.0](LICENSE)，可免费非商业使用，不允许修改或再发布。发现安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。

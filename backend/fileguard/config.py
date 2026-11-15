@@ -46,9 +46,33 @@ OSV_ENABLED = os.environ.get("FILEGUARD_OSV", "1") == "1"
 # Optional threat-intel API keys (abuse.ch now requires an Auth-Key)
 ABUSECH_AUTH_KEY = os.environ.get("FILEGUARD_ABUSECH_KEY", "")
 
+
+def _local_config():
+    """Per-install settings written by install.sh (data/local_config.json), e.g. the SSRF proxy
+    CIDR detected on hosts whose DNS answers with fake-IP proxy addresses."""
+    import json
+    try:
+        return json.loads((DATA_DIR / "local_config.json").read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+
+LOCAL = _local_config()
+
 # Extra CIDRs treated as "public" for SSRF checks. Needed on sandboxed hosts whose DNS
-# returns proxy addresses (e.g. 198.18.0.0/15). Leave empty on a real server.
-SSRF_EXTRA_ALLOWED_CIDRS = [c for c in os.environ.get("FILEGUARD_SSRF_ALLOW_CIDRS", "").split(",") if c.strip()]
+# returns proxy addresses (e.g. 198.18.0.0/15). install.sh only writes this into
+# data/local_config.json when it detects that well-known public hosts resolve there.
+_cidrs = os.environ.get("FILEGUARD_SSRF_ALLOW_CIDRS")
+if _cidrs is None:
+    _cidrs = ",".join(LOCAL.get("ssrf_allow_cidrs") or [])
+SSRF_EXTRA_ALLOWED_CIDRS = [c.strip() for c in _cidrs.split(",") if c.strip()]
+
+# ClamAV signature database: FileGuard keeps its own copy under data/ (updated by freshclam
+# during the daily maintenance run); falls back to the system database for old installs.
+_own_db = DATA_DIR / "clamav-db"
+CLAMAV_DB_DIR = Path(os.environ.get("FILEGUARD_CLAMAV_DB") or (
+    _own_db if any(_own_db.glob("main.c?d")) else Path("/var/lib/clamav")))
+CLAMAV_DB_STALE_DAYS = _int("FILEGUARD_CLAMAV_DB_STALE_DAYS", 7)
 
 for d in (WORK_DIR, DATA_DIR / "reports", DATA_DIR / "scans", DATA_DIR / "cache",
           DATA_DIR / "baselines", DATA_DIR / "confirmations", DATA_DIR / "dep_cache",

@@ -1,0 +1,10 @@
+# FileGuard freshclam config (signature DB lives in the FileGuard data dir, no root needed).
+# @CLAMAV_DB@ / @FILEGUARD_DIR@ are filled in by scripts/update_clamav_db.sh.
+DatabaseDirectory @CLAMAV_DB@
+UpdateLogFile @FILEGUARD_DIR@/run/freshclam.log
+LogTime yes
+DatabaseMirror database.clamav.net
+ConnectTimeout 30
+ReceiveTimeout 300
+Checks 0
+Bytecode yes

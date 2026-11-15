@@ -8,6 +8,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from . import tools
+
 COMMON_CMDS = {"npm", "npx", "node", "git", "sh", "bash", "zsh", "python", "python3", "pip", "pip3", "curl", "wget",
                "ls", "sudo", "ssh", "yarn", "pnpm", "docker", "kubectl", "code", "cd", "cp", "mv", "rm", "cat", "env"}
 UNCOMMON_BACKENDS_OK = ("setuptools.build_meta", "poetry.core.masonry.api", "poetry.masonry.api", "flit_core.buildapi",
@@ -184,8 +186,8 @@ def rpm_checks(ctx, path, rel):
         ctx.miss("S3", "RPM_SCRIPTLETS_NOT_PARSED", "缺少 rpm 工具，RPM 安装脚本未解析", "rpm tool missing; RPM scriptlets not parsed", rel)
         return ""
     try:
-        r = subprocess.run(["rpm", "-qp", "--nosignature", "--nodigest", "--scripts", "--triggers", path], capture_output=True, text=True, timeout=60, errors="replace")
-        fl = subprocess.run(["rpm", "-qp", "--nosignature", "--nodigest", "--qf", "[%{FILEMODES:perms} %{FILENAMES}\n]", path],
+        r = tools.run_limited(["rpm", "-qp", "--nosignature", "--nodigest", "--scripts", "--triggers", path], capture_output=True, text=True, timeout=60, errors="replace")
+        fl = tools.run_limited(["rpm", "-qp", "--nosignature", "--nodigest", "--qf", "[%{FILEMODES:perms} %{FILENAMES}\n]", path],
                             capture_output=True, text=True, timeout=60, errors="replace")
     except subprocess.TimeoutExpired:
         ctx.miss("S3", "RPM_SCRIPTLETS_NOT_PARSED", "RPM 解析超时", "RPM parsing timed out", rel)
@@ -209,7 +211,7 @@ def msi_checks(ctx, path, rel):
         ctx.miss("S3", "MSI_CUSTOM_ACTIONS_NOT_PARSED", "缺少 msitools，MSI CustomAction 未解析", "msitools missing; MSI CustomActions not parsed", rel)
         return ""
     try:
-        tables = subprocess.run(["msiinfo", "tables", path], capture_output=True, text=True, timeout=60).stdout.split()
+        tables = tools.run_limited(["msiinfo", "tables", path], capture_output=True, text=True, timeout=60).stdout.split()
     except Exception:
         tables = []
     if not tables:
@@ -218,7 +220,7 @@ def msi_checks(ctx, path, rel):
     out = ""
     for t in ("CustomAction", "Registry", "ServiceInstall", "ScheduledTask", "InstallExecuteSequence"):
         if t in tables:
-            out += f"\n### {t}\n" + subprocess.run(["msiinfo", "export", path, t], capture_output=True, text=True, timeout=60, errors="replace").stdout
+            out += f"\n### {t}\n" + tools.run_limited(["msiinfo", "export", path, t], capture_output=True, text=True, timeout=60, errors="replace").stdout
     ca = re.findall(r"^([^\t\n]+)\t(\d+)\t([^\t\n]*)\t([^\n]*)$", out.split("### Registry")[0], re.M)
     for name, typ, src, target in ca[3:]:
         base = int(typ) & 0x3F if typ.isdigit() else 0
@@ -251,7 +253,7 @@ def inno_checks(ctx, path, rel):
     if not shutil.which("innoextract"):
         ctx.miss("S3", "INNO_SCRIPT_NOT_PARSED", "缺少 innoextract，Inno Setup 安装脚本未解析", "innoextract missing; Inno Setup script not parsed", rel)
         return
-    r = subprocess.run(["innoextract", "--list", "--silent", path], capture_output=True, text=True, timeout=120, errors="replace")
+    r = tools.run_limited(["innoextract", "--list", "--silent", path], capture_output=True, text=True, timeout=120, errors="replace")
     if r.returncode != 0:
         ctx.miss("S3", "INNO_SCRIPT_NOT_PARSED", "Inno Setup 安装包无法解析", "Inno Setup installer could not be parsed", rel)
         return

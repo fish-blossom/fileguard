@@ -17,8 +17,12 @@ FileGuard 是一个**只做静态分析**的恶意文件 / 软件供应链投毒
 
 ```
 /workspace/fileguard          # 默认安装位置（FILEGUARD_DIR）
-├── install.sh              # 幂等安装 / 更新（--estimate、--tarball）
-├── VERSION                 # 发布版本（与 fileguard/__init__.py 的引擎协议版本分开）
+├── install.sh              # 校验签名后安装 / 更新（--estimate、--auto、--tarball、--dir）
+├── VERSION                 # 发布版本（semver，与 fileguard/__init__.py 的 ENGINE_VERSION 一致）
+├── release-signers         # 固定的发布签名公钥（ssh-keygen -Y verify）
+├── requirements.lock       # 带 SHA-256 的完整依赖锁定（只装 wheel）
+├── vendor/                 # 安装时下载的官方 7-Zip、ClamAV（按 SHA-256 固定）
+├── .venv/                  # Python 虚拟环境
 ├── fileguard/              # 引擎源码
 │   ├── cli.py              # `fg` / `python -m fileguard.cli`：submit / wait / delivered / confirm …
 │   ├── config.py           # 所有上限（500MB、1GB、5 层、200 依赖…），均可用环境变量覆盖
@@ -26,7 +30,8 @@ FileGuard 是一个**只做静态分析**的恶意文件 / 软件供应链投毒
 │   ├── store.py            # 文件持久化：扫描记录、Hash 缓存、依赖缓存、版本基线、确认、签名者、耗时
 │   ├── delivery.py         # 全程预计时间中的“整理和发送报告”开销，及 delivered 校准
 │   ├── baselines.py        # 本地基线文件；没有本地基线时从注册表拉取上一版本再做文件比较
-│   ├── netutil.py          # 防 SSRF、限大小、逐跳重定向检查的下载器
+│   ├── netutil.py          # 防 SSRF（含连接后核对对端 IP，防 DNS 重绑定）、限大小、逐跳重定向检查的下载器
+│   ├── tools.py            # 外部解析工具定位（优先 vendor/）与 RLIMIT 资源限制
 │   ├── source.py           # S1/S2 来源信誉
 │   ├── sigverify.py        # 签名验证：npm 注册表 ECDSA、发布证明 + SLSA、PyPI PEP 740、GPG、Authenticode
 │   ├── source_diff.py      # 发布包 vs 源码仓库对应 tag
@@ -37,8 +42,8 @@ FileGuard 是一个**只做静态分析**的恶意文件 / 软件供应链投毒
 │   └──（无 mcp_server、无 SQLite）
 ├── rules/fileguard.yar
 ├── intel/                  # 本地情报：已知恶意 Hash、恶意包名单、网络 IOC、热门包名
-├── clamav/clamd.conf.in    # 专用 clamd 配置模板（start_clamd.sh 写入实际路径）
-├── scripts/                # fg、env.sh、start_clamd.sh、build_release.sh
+├── clamav/                 # clamd.conf.in / freshclam.conf.in 模板（脚本写入实际路径）
+├── scripts/                # fg、env.sh、start_clamd.sh、update_clamav_db.sh、build_release.sh
 ├── （本公开仓库不含 tests/）
 └── data/                   # 运行时（FILEGUARD_DATA，默认 $FILEGUARD_HOME/data）
     ├── scans/<scan_id>/    # meta.json、result.json、worker.log
@@ -46,31 +51,36 @@ FileGuard 是一个**只做静态分析**的恶意文件 / 软件供应链投毒
     ├── cache/<sha256>.json # 按引擎/规则/病毒库版本命中
     ├── baselines/<eco>/<name>/<version>.json
     ├── dep_cache/  confirmations/  signers/  timings/
+    ├── clamav-db/          # FileGuard 自己的 ClamAV 病毒库（每天最多更新一次）
+    ├── local_config.json   # 本机配置（如探测到的 SSRF 代理网段）
+    ├── update_state.json   # 上次检查新版本的时间
     ├── delivery_times.json
     └── work/               # 临时样本，扫完即删
 ```
 
 ## 2. 已安装的组件
 
-| 组件 | 用途 |
-|---|---|
-| ClamAV 1.4.3 + clamd + freshclam | 病毒特征库扫描（main/daily/bytecode 已更新） |
-| YARA 4.5 + yara-python | FileGuard 自有规则 |
-| 7zip、unrar-free、unar、libarchive-tools | 7z / RAR / deb / rpm / NSIS 解包（只解不执行） |
-| rpm、msitools、innoextract、osslsigncode、gpg | 只读解析 RPM 脚本、MSI 表、Inno 安装包；验证 Authenticode、GPG 签名 |
-| sigstore 4.5、pypi-attestations、cryptography | npm provenance / PyPI PEP 740 的 Sigstore 验证，npm 注册表 ECDSA 签名 |
-| oletools、pefile、python-magic | Office 宏、PE 结构、真实文件类型识别 |
-| httpx、node-semver、packaging | 下载、依赖版本解析 |
+| 组件 | 来源 | 用途 |
+|---|---|---|
+| ClamAV 1.4.6（clamd、clamscan、freshclam） | Cisco Talos 官方 .deb，SHA-256 固定，解到 `vendor/clamav` | 病毒特征库扫描；病毒库在 `data/clamav-db`，每天最多更新一次 |
+| 7-Zip 26.06（7zzs 静态版） | 7-zip.org 官方链接的 GitHub Release，SHA-256 固定，放在 `vendor/7zip` | 7z / RAR / deb / rpm / NSIS 解包（只解不执行） |
+| yara-python 4.5 | PyPI wheel（哈希锁定） | FileGuard 自有规则 |
+| rpm、msitools、innoextract、osslsigncode、gpg | 系统 apt | 只读解析 RPM 脚本、MSI 表、Inno 安装包；验证 Authenticode、GPG 签名 |
+| sigstore、pypi-attestations、cryptography | PyPI wheel（哈希锁定） | npm provenance / PyPI PEP 740 的 Sigstore 验证，npm 注册表 ECDSA 签名 |
+| oletools、pefile、python-magic | PyPI wheel（哈希锁定） | Office 宏、PE 结构、真实文件类型识别 |
+| httpx、node-semver、packaging | PyPI wheel（哈希锁定） | 下载、依赖版本解析 |
 
-Python 依赖见 `requirements.txt`（虚拟环境在 `.venv/`）。
+Python 依赖：`requirements.txt` 是顶层清单，`requirements.lock` 是带哈希的完整锁定，安装时用 `pip install --require-hashes --only-binary=:all:`。所有外部解析工具都带 `RLIMIT_AS`（默认 4 GB）/ `RLIMIT_CPU` 限制运行。7-Zip 或 ClamAV 版本低于已修复漏洞的版本、病毒库超过 7 天未更新时，扫描会记缺失项（`PARSER_OUTDATED` / `CLAMAV_DB_STALE`），`fg version --json` 也会显示。
 
 ## 3. 如何运行
 
 ```bash
-# 安装或更新（幂等）。--estimate 只预估耗时、不改动系统。
+# 安装或更新到最新的已签名 Release。--estimate 只预估耗时、不改动系统。
 ./install.sh --estimate
 ./install.sh
-# 或从发布包：
+# 每天的静默维护（24 小时内最多查一次新版本，并更新病毒库）：
+./install.sh --auto
+# 用已下载的发布包（仍会对照签名 manifest 校验）：
 ./install.sh --tarball /path/to/fileguard.tar.gz
 
 cd /workspace/fileguard
@@ -81,7 +91,8 @@ scripts/start_clamd.sh
 
 # Bot 使用的两次调用（全程预计时间含整理和发送报告）
 fg submit_url https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz --lang zh
-fg wait <scan_id> --lang zh
+fg wait <scan_id> --lang zh --timeout 55   # 55 秒没扫完返回当前阶段（退出码 3），再 wait 一次
+fg submit_pkg npm left-pad 1.3.0 --lang zh   # 只给包名和版本
 # 可选校准：fg delivered <scan_id>
 # 确认 INCOMPLETE：fg confirm_incomplete <scan_id> <sha256> <check1,check2> <确认人> [说明]
 
@@ -90,13 +101,7 @@ fg scan /path/to/file --lang zh
 fg --version
 ```
 
-默认安装源是 GitHub 仓库 `main` 分支的自动归档（也可 `git clone`）：
-
-```
-https://github.com/fish-blossom/fileguard/archive/refs/heads/main.tar.gz
-```
-
-版本检查用 `https://raw.githubusercontent.com/fish-blossom/fileguard/main/backend/VERSION`。可用 `FILEGUARD_SOURCE_URL` / `FILEGUARD_SOURCE_VERSION_URL` 覆盖。`install.sh --tarball` / `--dir` 仍可用于本地安装。GitHub 归档解压后引擎在 `fileguard-main/backend/`。
+安装源只用 GitHub Release（`https://github.com/fish-blossom/fileguard/releases/latest/download/`）：`manifest.json` + `manifest.json.sig`（发布密钥签名）+ `fileguard.tar.gz`。`install.sh` 先用已安装副本里固定的公钥（首次安装用下载包自带的公钥）验证 manifest 签名，再核对 tarball 的 SHA-256，都通过才解压。更新先在 `.stage/` 里建好新代码、venv 和工具并自检，再整体替换，失败自动回滚；旧版本目录 `.prev-*` 留到下次安装时清理。发布用 `scripts/build_release.sh`（基于 `git archive`，可复现）。
 
 对用户只在**第一次安装**时说一句「⚙️ 正在初始化 FileGuard，预计约 N 分钟」，完成后（含静默的 left-pad 验证）再说「✅ 初始化完成，可以开始检测了」。已经是最新版或后台更新时，什么都不要说；更新失败就继续用旧版本，只有引擎无法使用时才告知用户。不要列举安装了哪些组件。
 
@@ -183,15 +188,15 @@ https://github.com/fish-blossom/fileguard/archive/refs/heads/main.tar.gz
 - 源码 tag 比对只支持 GitHub；GitLab/Bitbucket/自建仓库记为“不可用”。很多包（如 lodash）发布内容由构建脚本生成，差异会以“信息”级别列出，不判定。
 - npm provenance 的身份核对是“构建身份包含 package.json 声明的 GitHub 仓库”；没有声明仓库时只验证签名本身。
 - macOS 代码签名无法在 Linux 上验证（Mach-O 计为缺失项）；Inno Setup 的 [Code]/[Run] 段不反编译（计为缺失项）；InstallShield 不解析（计为缺失项）。
-- DNS 重绑定：下载前解析并检查 IP，但连接时没有把 IP 钉死，理论上存在 TOCTOU 窗口；上公网前建议加出站代理或固定解析。
+- DNS 重绑定：下载前解析并检查 IP，连接建立后再核对实际连接的对端 IP；走环境变量配置的出站代理时，对端是代理，由代理负责解析。
 - YARA 规则是自研小规则集；只做静态分析，运行时才解密或下载的载荷可能看不到。
 
 ## 11. 安装到用户的 box（不再部署公共服务器）
 
-每个用户在自己的 Debian/Ubuntu box 上安装引擎，不需要公网服务、端口转发或 MCP。推荐方式见仓库根 README：先下载 `main` 分支归档，再运行其中的 `backend/install.sh --estimate` 与 `backend/install.sh`。也可 `git clone` 后运行 `backend/install.sh`，或用 `./install.sh --tarball /path/to/fileguard.tar.gz`。
+每个用户在自己的 Debian/Ubuntu box 上安装引擎，不需要公网服务、端口转发或 MCP。推荐方式见仓库根 README：下载最新 Release 的 `fileguard.tar.gz`，`sha256sum -c` 校验后解压，运行其中的 `install.sh --estimate` 与 `install.sh --tarball <tarball>`。
 
-第一次对话由 Bot 调用 `install.sh --estimate`，向用户只展示一句初始化预计时间，再执行 `install.sh`。apt 需要 sudo；没有 sudo 时会跳过系统包。
+第一次对话由 Bot 调用 `install.sh --estimate`，向用户只展示一句初始化预计时间，再执行安装。apt 需要 sudo；没有 sudo 时会跳过系统包。只有默认目录 `/workspace/fileguard` 的安装会写 `/usr/local/bin/fg`；其他目录的安装会复用默认安装正在运行的 clamd，不再另起一个。
 
-不要在普通用户的 box 上设置 `FILEGUARD_SSRF_ALLOW_CIDRS`，除非你处于需要额外放行的代理环境。仓库里的 `scripts/env.sh` 默认不设置该变量。
+SSRF 代理网段：安装时如果探测到 github.com、registry.npmjs.org 等公共域名被解析到 `198.18.0.0/15`（伪 IP 代理环境），才把这个网段写进 `data/local_config.json` 放行；普通服务器上不放行。环境变量 `FILEGUARD_SSRF_ALLOW_CIDRS` 仍可覆盖。
 
 可选：设置 `FILEGUARD_ABUSECH_KEY`，并在 `intel/trusted_gpg_fingerprints.txt` 填入可信的官方 GPG 指纹。`data/` 在更新时保留。更新失败会尽量回滚到上一版本；Bot 对用户保持沉默，只有引擎已经无法使用时才提示。

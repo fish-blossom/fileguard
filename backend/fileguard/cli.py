@@ -9,8 +9,13 @@ Two-round bot flow (estimates cover scan + writing/sending the report):
       estimate_text (engine time + delivery overhead). The scan runs in a detached
       background process. Tell the user estimate_text.
 
-  fg wait <scan_id> [--lang zh|en]
-      Block until the scan finishes (no overall timeout). Progress goes to stderr only when
+  fg submit_pkg npm|pypi <name> <version> [--lang zh|en] [--force]
+      Resolve the official registry artifact (npm dist.tarball / PyPI sdist or wheel) and submit it.
+
+  fg wait <scan_id> [--lang zh|en] [--timeout SECONDS]
+      Block until the scan finishes (no overall scan timeout). With --timeout, return early
+      (exit code 3) with {"status": "running", "stage", "stage_detail", "remaining_text"} so the
+      bot can post one "still scanning" line and then call `fg wait` again. Progress goes to stderr only when
       the stage changes. When done, writes the HTML report and prints ONE compact JSON
       (verdict, summary, html_path, cache_hit, reused_from, timing). Never prints markdown.
       Also records a provisional delivery-overhead sample (submit→wait, minus engine time).
@@ -24,7 +29,8 @@ Two-round bot flow (estimates cover scan + writing/sending the report):
   fg confirm_incomplete <scan_id> <sha256> <check1,check2,...> <confirmed_by> [statement]
   fg report_html <scan_id> [--lang zh|en]
   fg get_report <scan_id> [--lang zh|en] [--format markdown|json|both|html]
-  fg version / fg --version
+  fg version [--json] / fg --version
+      --json adds parser versions (7-Zip, ClamAV), signature DB date and missing components.
   fg scan <path|url>   (synchronous helper: submit + wait)
 
 Env:
@@ -61,16 +67,16 @@ def _version():
 
 
 def _missing_components():
-    import shutil
-    from . import scanners
+    from . import scanners, tools
     missing = []
-    if not shutil.which("clamdscan") and not shutil.which("clamscan"):
+    if not tools.clam("clamdscan") and not tools.clam("clamscan"):
         missing.append("clamav")
-    else:
-        if not scanners.clamd_available() and not shutil.which("clamscan"):
-            missing.append("clamd_or_clamscan_running")
-    if not shutil.which("yara") and not _yara_python_ok():
+    elif not scanners.clamd_available() and not tools.clam("clamscan"):
+        missing.append("clamd_or_clamscan_running")
+    if not _yara_python_ok():
         missing.append("yara")
+    if not tools.sevenzip():
+        missing.append("7zip")
     return missing
 
 
@@ -83,18 +89,29 @@ def _yara_python_ok():
 
 
 def cmd_version(as_json=False):
-    missing = _missing_components()
+    if not as_json:
+        print(f"FileGuard {_version()}")
+        return 0
+    from . import scanners, tools
+    parsers = tools.parser_status()
+    db = scanners.db_info()
+    checks = []
+    if db.get("stale"):
+        checks.append("CLAMAV_DB_STALE")
+    if any(p["version"] and not p["ok"] for p in parsers):
+        checks.append("PARSER_OUTDATED")
     info = {
         "version": _version(),
         "engine_version": ENGINE_VERSION,
         "dir": str(config.BASE_DIR),
         "data_dir": str(config.DATA_DIR),
-        "missing_components": missing,
+        "missing_components": _missing_components(),
+        "parsers": parsers,
+        "clamav_db": db,
+        "self_check_missing": checks,
+        "ssrf_allow_cidrs": config.SSRF_EXTRA_ALLOWED_CIDRS,
     }
-    if as_json:
-        _dump(info)
-    else:
-        print(f"FileGuard {info['version']}")
+    _dump(info)
     return 0
 
 
@@ -159,9 +176,43 @@ def cmd_submit(kind, target, lang, expected_sha256=None, force=False):
     return 0
 
 
-def cmd_wait(scan_id, lang):
+def resolve_pkg(eco, name, version):
+    """Official artifact URL for a registry package (never installs anything)."""
+    import urllib.parse
+    import httpx
+    from . import USER_AGENT
+    eco = eco.lower()
+    h = {"User-Agent": USER_AGENT}
+    if eco == "npm":
+        q = urllib.parse.quote(name, safe="@")
+        q = q.replace("/", "%2F") if not name.startswith("@") else "@" + urllib.parse.quote(name[1:], safe="")
+        r = httpx.get(f"{config.NPM_REGISTRY}/{q}/{urllib.parse.quote(version, safe='')}", headers=h,
+                      timeout=config.NET_STALL_TIMEOUT, follow_redirects=True)
+        if r.status_code != 200:
+            _fail(f"submit_pkg: npm {name}@{version} not found (HTTP {r.status_code})")
+        dist = r.json().get("dist") or {}
+        if not dist.get("tarball"):
+            _fail(f"submit_pkg: npm {name}@{version} has no dist.tarball")
+        return dist["tarball"], None
+    if eco in ("pypi", "pip", "python"):
+        r = httpx.get(f"{config.PYPI_URL}/pypi/{urllib.parse.quote(name)}/{urllib.parse.quote(version)}/json",
+                      headers=h, timeout=config.NET_STALL_TIMEOUT, follow_redirects=True)
+        if r.status_code != 200:
+            _fail(f"submit_pkg: PyPI {name}=={version} not found (HTTP {r.status_code})")
+        files = r.json().get("urls") or []
+        pick = (next((f for f in files if f.get("packagetype") == "sdist"), None)
+                or next((f for f in files if f.get("filename", "").endswith("py3-none-any.whl")), None)
+                or (files[0] if files else None))
+        if not pick:
+            _fail(f"submit_pkg: PyPI {name}=={version} has no files")
+        return pick["url"], (pick.get("digests") or {}).get("sha256")
+    _fail(f"submit_pkg: unsupported ecosystem {eco} (use npm or pypi)")
+
+
+def cmd_wait(scan_id, lang, timeout=None):
     lang = "en" if (lang or "zh").lower().startswith("en") else "zh"
     last_stage = None
+    t0 = time.time()
     while True:
         r = service.get_report(scan_id, lang, fmt="summary")
         if not isinstance(r, dict):
@@ -179,6 +230,11 @@ def cmd_wait(scan_id, lang):
                 if rem:
                     line += f" — {rem}"
                 print(line, file=sys.stderr, flush=True)
+            if timeout is not None and time.time() - t0 >= timeout:
+                print(json.dumps({"scan_id": scan_id, "status": status, "stage": r.get("stage"),
+                                  "stage_detail": r.get("stage_detail"), "remaining_text": r.get("remaining_text"),
+                                  "elapsed_seconds": r.get("elapsed_seconds")}, ensure_ascii=False))
+                sys.exit(3)
             time.sleep(1)
             continue
         break
@@ -294,99 +350,6 @@ def cmd_report_html(scan_id, lang):
     _fail(f"report_html failed ({status or 'unknown'}): {msg}")
 
 
-def main(argv=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
-    # --version / -V before subcommands
-    if argv and argv[0] in ("--version", "-V"):
-        return cmd_version(as_json=False)
-    if argv and argv[0] in ("-h", "--help") and len(argv) == 1:
-        print(__doc__)
-        return 0
-
-    p = argparse.ArgumentParser(prog="fg", description="FileGuard CLI")
-    p.add_argument("--version", action="store_true", help="print version and exit")
-    sub = p.add_subparsers(dest="cmd")
-
-    def add_lang(sp):
-        sp.add_argument("--lang", default="zh")
-        return sp
-
-    su = add_lang(sub.add_parser("submit_url", help="submit a download URL; print estimate JSON"))
-    su.add_argument("url")
-    su.add_argument("--expected-sha256", "--sha256", dest="expected_sha256", default=None)
-    su.add_argument("--force", action="store_true")
-
-    sf = add_lang(sub.add_parser("submit_file", help="submit a local file; print estimate JSON"))
-    sf.add_argument("path")
-    sf.add_argument("--expected-sha256", "--sha256", dest="expected_sha256", default=None)
-    sf.add_argument("--force", action="store_true")
-
-    sw = add_lang(sub.add_parser("wait", help="block until done; print compact result JSON"))
-    sw.add_argument("scan_id")
-
-    sd = sub.add_parser("delivered", help="record end-to-end delivery time (optional)")
-    sd.add_argument("scan_id")
-
-    sc = sub.add_parser("confirm_incomplete")
-    sc.add_argument("scan_id")
-    sc.add_argument("sha256")
-    sc.add_argument("missing_checks")
-    sc.add_argument("confirmed_by")
-    sc.add_argument("statement", nargs="*", default=[])
-
-    rh = add_lang(sub.add_parser("report_html"))
-    rh.add_argument("scan_id")
-
-    gr = add_lang(sub.add_parser("get_report"))
-    gr.add_argument("scan_id")
-    gr.add_argument("--format", default="markdown", choices=["markdown", "json", "both", "html", "summary"])
-
-    ver = sub.add_parser("version")
-    ver.add_argument("--json", action="store_true")
-
-    scn = add_lang(sub.add_parser("scan", help="submit + wait (synchronous helper)"))
-    scn.add_argument("target")
-    scn.add_argument("--expected-sha256", dest="expected_sha256", default=None)
-    scn.add_argument("--force", action="store_true")
-
-    sub.add_parser("_run", help=argparse.SUPPRESS).add_argument("scan_id")
-
-    a = p.parse_args(argv)
-    if a.version or a.cmd is None:
-        # `fg` with no args: print version + short usage
-        if a.cmd is None and not a.version:
-            cmd_version()
-            print("usage: fg submit_url|submit_file|wait|delivered|confirm_incomplete|report_html|get_report|version …", file=sys.stderr)
-            return 0
-        return cmd_version()
-
-    if a.cmd == "submit_url":
-        return cmd_submit("url", a.url, a.lang, a.expected_sha256, a.force)
-    if a.cmd == "submit_file":
-        return cmd_submit("file", a.path, a.lang, a.expected_sha256, a.force)
-    if a.cmd == "wait":
-        return cmd_wait(a.scan_id, a.lang)
-    if a.cmd == "delivered":
-        return cmd_delivered(a.scan_id)
-    if a.cmd == "confirm_incomplete":
-        return cmd_confirm(a.scan_id, a.sha256, a.missing_checks, a.confirmed_by, " ".join(a.statement))
-    if a.cmd == "report_html":
-        return cmd_report_html(a.scan_id, a.lang)
-    if a.cmd == "get_report":
-        return cmd_get_report(a.scan_id, a.lang, a.format)
-    if a.cmd == "version":
-        return cmd_version(as_json=a.json)
-    if a.cmd == "scan":
-        kind = "url" if a.target.startswith(("http://", "https://")) else "file"
-        cmd_submit(kind, a.target, a.lang, a.expected_sha256, a.force)
-        # cmd_submit already printed; we need the scan_id. Re-submit would be wrong.
-        # Instead do submit internally:
-        return 0  # placeholder, replaced below
-    if a.cmd == "_run":
-        return service.run_worker(a.scan_id)
-    _fail(f"unknown command: {a.cmd}")
-
-
 def _cmd_scan(target, lang, expected, force):
     """Synchronous submit+wait; prints the wait compact JSON only."""
     lang = "en" if (lang or "zh").lower().startswith("en") else "zh"
@@ -400,79 +363,79 @@ def _cmd_scan(target, lang, expected, force):
     r = service.submit(src, lang, expected_sha256=expected, force_rescan=force)
     if not r.get("scan_id"):
         _fail(f"submit failed: {r}")
-    engine = r.get("estimated_seconds") or 0
-    oh, lo, hi, src_model = deliv.overhead_model()
-    deliv.mark_submitted(r["scan_id"], engine)
-    # do not print the submit JSON — scan is a one-shot helper
+    deliv.mark_submitted(r["scan_id"], r.get("estimated_seconds") or 0)
     return cmd_wait(r["scan_id"], lang)
 
 
-# fix main()'s scan branch by wrapping
-_main_impl = main
-
-
-def main(argv=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] in ("--version", "-V"):
-        return cmd_version(as_json=False)
-    # Intercept `scan` after parse by calling the real main for everything else,
-    # but we already have a placeholder. Simpler: parse here only for scan? Just
-    # replace the function body usage. Recurse-safe: if first arg is scan, handle.
-    if argv and argv[0] == "scan" or (argv and argv[0] not in ("-h", "--help", "--version", "-V") and False):
-        pass
-    return _dispatch(argv)
-
-
-def _dispatch(argv):
-    # Re-parse with the same argparse by calling a cleaned main
-    # We rewrite sys.argv-less dispatch without the broken scan branch.
-    if argv and argv[0] in ("-h", "--help") and len(argv) == 1:
-        print(__doc__)
-        return 0
+def _parser():
     p = argparse.ArgumentParser(prog="fg", description="FileGuard CLI")
-    p.add_argument("--version", action="store_true")
+    p.add_argument("--version", action="store_true", help="print version and exit")
     sub = p.add_subparsers(dest="cmd")
 
     def add_lang(sp):
         sp.add_argument("--lang", default="zh")
         return sp
 
-    su = add_lang(sub.add_parser("submit_url"))
+    su = add_lang(sub.add_parser("submit_url", help="submit a download URL; print estimate JSON"))
     su.add_argument("url")
     su.add_argument("--expected-sha256", "--sha256", dest="expected_sha256", default=None)
     su.add_argument("--force", action="store_true")
-    sf = add_lang(sub.add_parser("submit_file"))
+    sf = add_lang(sub.add_parser("submit_file", help="submit a local file; print estimate JSON"))
     sf.add_argument("path")
     sf.add_argument("--expected-sha256", "--sha256", dest="expected_sha256", default=None)
     sf.add_argument("--force", action="store_true")
-    add_lang(sub.add_parser("wait")).add_argument("scan_id")
-    sub.add_parser("delivered").add_argument("scan_id")
+    sp = add_lang(sub.add_parser("submit_pkg", help="submit a registry package: npm|pypi <name> <version>"))
+    sp.add_argument("ecosystem")
+    sp.add_argument("name")
+    sp.add_argument("pkg_version")
+    sp.add_argument("--expected-sha256", "--sha256", dest="expected_sha256", default=None)
+    sp.add_argument("--force", action="store_true")
+    sw = add_lang(sub.add_parser("wait", help="block until done; print compact result JSON"))
+    sw.add_argument("scan_id")
+    sw.add_argument("--timeout", type=float, default=None, help="return early (exit 3) with the current stage")
+    sub.add_parser("delivered", help="record end-to-end delivery time (optional)").add_argument("scan_id")
     sc = sub.add_parser("confirm_incomplete")
-    sc.add_argument("scan_id"); sc.add_argument("sha256"); sc.add_argument("missing_checks")
-    sc.add_argument("confirmed_by"); sc.add_argument("statement", nargs="*", default=[])
+    sc.add_argument("scan_id")
+    sc.add_argument("sha256")
+    sc.add_argument("missing_checks")
+    sc.add_argument("confirmed_by")
+    sc.add_argument("statement", nargs="*", default=[])
     add_lang(sub.add_parser("report_html")).add_argument("scan_id")
     gr = add_lang(sub.add_parser("get_report"))
     gr.add_argument("scan_id")
     gr.add_argument("--format", default="markdown", choices=["markdown", "json", "both", "html", "summary"])
-    ver = sub.add_parser("version"); ver.add_argument("--json", action="store_true")
-    scn = add_lang(sub.add_parser("scan"))
+    sub.add_parser("version").add_argument("--json", action="store_true")
+    scn = add_lang(sub.add_parser("scan", help="submit + wait (synchronous helper)"))
     scn.add_argument("target")
     scn.add_argument("--expected-sha256", dest="expected_sha256", default=None)
     scn.add_argument("--force", action="store_true")
     sub.add_parser("_run", help=argparse.SUPPRESS).add_argument("scan_id")
+    return p
 
-    a = p.parse_args(argv)
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in ("--version", "-V"):
+        return cmd_version(as_json=False)
+    if argv and argv[0] in ("-h", "--help") and len(argv) == 1:
+        print(__doc__)
+        return 0
+    a = _parser().parse_args(argv)
     if a.version or a.cmd is None:
         cmd_version()
         if a.cmd is None and not a.version:
-            print("usage: fg submit_url|submit_file|wait|delivered|confirm_incomplete|report_html|get_report|version …", file=sys.stderr)
+            print("usage: fg submit_url|submit_file|submit_pkg|wait|delivered|confirm_incomplete|report_html|get_report|version …",
+                  file=sys.stderr)
         return 0
     if a.cmd == "submit_url":
         return cmd_submit("url", a.url, a.lang, a.expected_sha256, a.force)
     if a.cmd == "submit_file":
         return cmd_submit("file", a.path, a.lang, a.expected_sha256, a.force)
+    if a.cmd == "submit_pkg":
+        url, sha = resolve_pkg(a.ecosystem, a.name, a.pkg_version)
+        return cmd_submit("url", url, a.lang, a.expected_sha256 or sha, a.force)
     if a.cmd == "wait":
-        return cmd_wait(a.scan_id, a.lang)
+        return cmd_wait(a.scan_id, a.lang, a.timeout)
     if a.cmd == "delivered":
         return cmd_delivered(a.scan_id)
     if a.cmd == "confirm_incomplete":
@@ -488,14 +451,6 @@ def _dispatch(argv):
     if a.cmd == "_run":
         return service.run_worker(a.scan_id)
     _fail(f"unknown command: {a.cmd}")
-
-
-# remove the messy first main — keep one
-def main(argv=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] in ("--version", "-V"):
-        return cmd_version(as_json=False)
-    return _dispatch(argv)
 
 
 if __name__ == "__main__":

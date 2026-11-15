@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # FileGuard CLI entry point. Prefers the install's venv.
 set -e
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 # Honour a pre-set FILEGUARD_HOME/DATA; otherwise this install is the home.
 export FILEGUARD_HOME="${FILEGUARD_HOME:-$ROOT}"
 if [ -z "${FILEGUARD_DATA:-}" ]; then

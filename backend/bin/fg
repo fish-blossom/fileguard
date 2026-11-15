@@ -1,2 +1,4 @@
 #!/usr/bin/env bash
-exec "$(cd "$(dirname "$0")/.." && pwd)/scripts/fg" "$@"
+# Resolve symlinks (e.g. /usr/local/bin/fg -> <install>/bin/fg) before locating scripts/fg.
+SELF="$(readlink -f "$0")"
+exec "$(cd "$(dirname "$SELF")/.." && pwd)/scripts/fg" "$@"

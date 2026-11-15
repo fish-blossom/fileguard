@@ -24,7 +24,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from . import config, netutil
+from . import config, netutil, tools
 
 TIMEOUT = config.NET_STALL_TIMEOUT
 import logging
@@ -261,8 +261,7 @@ def verify_gpg(final_url, sample_path):
     for ext in (".asc", ".sig", ".gpg"):
         u = final_url + ext
         try:
-            netutil.check_host(urllib.parse.urlsplit(u).hostname)
-            r = httpx.get(u, timeout=TIMEOUT, follow_redirects=False, headers={"User-Agent": netutil.USER_AGENT})
+            r = netutil.safe_get(u, timeout=TIMEOUT, max_bytes=200_000)
         except Exception:
             continue
         if r.status_code == 200 and 0 < len(r.content) < 100_000:
@@ -277,7 +276,7 @@ def verify_gpg(final_url, sample_path):
         sf = Path(home) / "file.sig"
         sf.write_bytes(sig)
         env = dict(os.environ, GNUPGHOME=home)
-        pk = subprocess.run(["gpg", "--batch", "--list-packets", str(sf)], capture_output=True, text=True, env=env, timeout=30)
+        pk = tools.run_limited(["gpg", "--batch", "--list-packets", str(sf)], capture_output=True, text=True, env=env, timeout=30)
         m = re.search(r"issuer fpr v4 ([0-9A-F]{40})", pk.stdout) or re.search(r"keyid ([0-9A-F]{16})", pk.stdout)
         if not m:
             return _st("gpg_signature", "invalid", "签名文件不是有效的 OpenPGP 签名", "Signature file is not a valid OpenPGP signature", sig_url=sig_url)
@@ -288,10 +287,10 @@ def verify_gpg(final_url, sample_path):
             if kr.status_code != 200:
                 return _st("gpg_signature", "failed", f"密钥服务器上找不到签名公钥 {fpr}", f"Signing key {fpr} not found on keyserver", sig_url=sig_url, fingerprint=fpr)
             (Path(home) / "key.asc").write_bytes(kr.content)
-            subprocess.run(["gpg", "--batch", "--import", str(Path(home) / "key.asc")], capture_output=True, env=env, timeout=30)
+            tools.run_limited(["gpg", "--batch", "--import", str(Path(home) / "key.asc")], capture_output=True, env=env, timeout=30)
         except Exception as e:
             return _st("gpg_signature", "failed", f"获取签名公钥失败（{type(e).__name__}）", f"Fetching signing key failed ({type(e).__name__})", sig_url=sig_url, fingerprint=fpr)
-        v = subprocess.run(["gpg", "--batch", "--status-fd", "1", "--verify", str(sf), sample_path], capture_output=True, text=True, env=env, timeout=120)
+        v = tools.run_limited(["gpg", "--batch", "--status-fd", "1", "--verify", str(sf), sample_path], capture_output=True, text=True, env=env, timeout=120)
         if "[GNUPG:] BADSIG" in v.stdout:
             return _st("gpg_signature", "invalid", f"GPG 签名无效：文件与签名不符（签名公钥 {fpr}）", f"GPG signature BAD: file does not match signature (key {fpr})", sig_url=sig_url, fingerprint=fpr)
         g = re.search(r"\[GNUPG:\] VALIDSIG ([0-9A-F]{40})", v.stdout)
@@ -336,7 +335,7 @@ def verify_authenticode(path):
         return _st("authenticode", "failed", "缺少 osslsigncode", "osslsigncode missing")
     ca = _ca_bundle()
     base = ["osslsigncode", "verify", "-CAfile", ca, "-TSA-CAfile", ca, "-in", path]
-    r = subprocess.run(base[:2] + ["-ignore-crl"] + base[2:], capture_output=True, text=True, timeout=config.TOOL_STALL_TIMEOUT, errors="replace")
+    r = tools.run_limited(base[:2] + ["-ignore-crl"] + base[2:], capture_output=True, text=True, timeout=config.TOOL_STALL_TIMEOUT, errors="replace")
     out = r.stdout + r.stderr
     signer = re.search(r"Signer #0:\s*\n\s*Subject:\s*(.+)", out)
     who = signer.group(1).strip()[:120] if signer else "?"
@@ -352,7 +351,7 @@ def verify_authenticode(path):
         return _st("authenticode", "failed", "Authenticode 验证未完成", "Authenticode verification not completed", signer=who)
     # revocation: download CRLs ourselves (osslsigncode's HTTP client fails behind proxies), pass as PEM
     # osslsigncode only prints the CRL distribution points when it attempts revocation; probe once for the URLs
-    probe = subprocess.run(base, capture_output=True, text=True, timeout=config.TOOL_STALL_TIMEOUT, errors="replace")
+    probe = tools.run_limited(base, capture_output=True, text=True, timeout=config.TOOL_STALL_TIMEOUT, errors="replace")
     po = probe.stdout + probe.stderr
     if probe.returncode == 0 and "Succeeded" in po:
         return _st("authenticode", "verified", f"Authenticode 签名有效，证书链与吊销状态均已检查：{who}", f"Authenticode valid; chain and revocation checked: {who}", signer=who)
@@ -372,8 +371,7 @@ def verify_authenticode(path):
                     if u in _CRL_CACHE:
                         data = _CRL_CACHE[u]
                     else:
-                        netutil.check_host(urllib.parse.urlsplit(u).hostname)
-                        rr = httpx.get(u, timeout=TIMEOUT, follow_redirects=True)
+                        rr = netutil.safe_get(u, timeout=TIMEOUT, max_bytes=50 * 1024 * 1024, follow_redirects=True)
                         if rr.status_code != 200 or not rr.content:
                             raise IOError(f"HTTP {rr.status_code}")
                         data = _CRL_CACHE[u] = rr.content
@@ -388,7 +386,7 @@ def verify_authenticode(path):
                 f.write_bytes(b"".join(pems))
                 files[kind] = str(f)
         args = base[:2] + (["-CRLfile", files["crl"]] if "crl" in files else []) + (["-TSA-CRLfile", files["tsa"]] if "tsa" in files else []) + base[2:]
-        r2 = subprocess.run(args, capture_output=True, text=True, timeout=config.TOOL_STALL_TIMEOUT, errors="replace")
+        r2 = tools.run_limited(args, capture_output=True, text=True, timeout=config.TOOL_STALL_TIMEOUT, errors="replace")
         o2 = r2.stdout + r2.stderr
         if r2.returncode == 0 and "Succeeded" in o2:
             return _st("authenticode", "verified", f"Authenticode 签名有效，证书链与吊销状态（CRL）均已检查：{who}",

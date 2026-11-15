@@ -17,7 +17,7 @@ import tarfile
 import zipfile
 from pathlib import Path
 
-from . import config
+from . import config, tools
 
 CHUNK = 1 << 16
 
@@ -320,13 +320,13 @@ class Unpacker:
 
     def _via_7z(self, item):
         rel0 = item["rel"]
-        exe = shutil.which("7z") or shutil.which("7zz")
+        exe = tools.sevenzip()
         if not exe:
             self.ctx.miss("S3", "UNPACK_TOOL_MISSING", "缺少 7z 工具，无法解包", "7z tool missing; cannot unpack", rel0)
             return
         try:
-            p = subprocess.run([exe, "l", "-slt", "-ba", "-pFG_NO_PASSWORD", "--", item["abs"]],
-                               capture_output=True, text=True, timeout=120, errors="replace")
+            p = tools.run_limited([exe, "l", "-slt", "-ba", "-pFG_NO_PASSWORD", "--", item["abs"]],
+                                  capture_output=True, text=True, timeout=120, errors="replace")
         except subprocess.TimeoutExpired:
             raise _Corrupt("list timeout")
         out = p.stdout
@@ -370,11 +370,9 @@ class Unpacker:
         d = self._newdir()
         left = self._budget_left()
 
-        def _limits():
-            resource.setrlimit(resource.RLIMIT_FSIZE, (left + 1, left + 1))
         try:
-            p = subprocess.run([exe, "x", "-y", "-snl-", "-pFG_NO_PASSWORD", f"-o{d}", "--", item["abs"]],
-                               capture_output=True, text=True, timeout=600, preexec_fn=_limits, errors="replace")
+            p = tools.run_limited([exe, "x", "-y", "-snl-", "-pFG_NO_PASSWORD", f"-o{d}", "--", item["abs"]],
+                                  capture_output=True, text=True, timeout=600, fsize=left + 1, errors="replace")
         except subprocess.TimeoutExpired:
             self.ctx.miss("S3", "UNPACK_TIMEOUT", "解包超时，内容未完整检测", "Unpacking timed out; contents not fully inspected", rel0)
             return

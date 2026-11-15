@@ -6,3 +6,7 @@ run/
 *.pyc
 *.pyo
 .fg-prev/
+.stage/
+.prev-*/
+vendor/
+dist/

@@ -14,7 +14,7 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from . import ENGINE_VERSION, config, netutil, scanners, store
+from . import ENGINE_VERSION, config, netutil, scanners, store, tools
 from .analyzers import Analyzer, ecosystem_of, file_type
 from .deps import DepResolver, typosquat_of
 from .model import SEVERITY_ORDER, ScanContext
@@ -320,9 +320,22 @@ def _s3_static(ctx, sample, work, prog):
     prog("S3:clamav")
     ok, det, engine, err = scanners.clamav_scan([i["abs"] for i in inv])
     ctx.tools["clamav"] = f"{scanners.clamav_version()} ({engine})"
+    dbi = scanners.db_info()
+    ctx.tools["clamav_db"] = dbi.get("date") or "N/A"
+    if dbi.get("stale"):
+        ctx.miss("S3", "CLAMAV_DB_STALE",
+                 f"ClamAV 病毒库过旧（最后更新 {dbi.get('date') or '未知'}，超过 {config.CLAMAV_DB_STALE_DAYS} 天），新出现的恶意软件可能认不出",
+                 f"ClamAV signature database is stale (last updated {dbi.get('date') or 'unknown'}, older than {config.CLAMAV_DB_STALE_DAYS} days)")
+    _exe7, _v7 = tools.sevenzip_version()
+    ctx.tools["unpacker"] = f"7-Zip {_v7}" if _v7 else "N/A"
+    for t in tools.parser_status():
+        if t["version"] and not t["ok"]:
+            ctx.miss("S3", "PARSER_OUTDATED",
+                     f"解析工具 {t['tool']} {t['version']} 低于已修复漏洞的版本 {t['min']}，解析不可信文件存在风险",
+                     f"Parser {t['tool']} {t['version']} is older than the patched version {t['min']}")
     abs2rel = {i["abs"]: i["rel"] for i in inv}
     for p, sig in det.items():
-        if sig.startswith(("Heuristics.Encrypted", "Heuristics.Limits", "Heuristics.Broken")):
+        if sig.startswith(("Heuristics.Encrypted", "Heuristics.Limits", "Heuristics.Broken")) or ".Limits.Exceeded" in sig:
             ctx.miss("S3", "CLAMAV_" + sig.split(".")[1].upper(), f"ClamAV 无法完整检查（{sig}）", f"ClamAV could not fully inspect ({sig})", abs2rel.get(p, p))
             continue
         ctx.add("critical", "S3", f"CLAMAV:{sig}", f"ClamAV 检出：{sig}", f"ClamAV detection: {sig}", abs2rel.get(p, p), sig)

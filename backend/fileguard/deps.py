@@ -13,7 +13,7 @@ import nodesemver
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 
-from . import ENGINE_VERSION, config, store
+from . import ENGINE_VERSION, USER_AGENT, config, store
 from .scanners import rules_version
 
 _KNOWN = json.loads((config.INTEL_DIR / "known_malicious_packages.json").read_text())
@@ -66,7 +66,7 @@ def known_malicious(eco, name, version):
 class DepResolver:
     def __init__(self, ctx):
         self.ctx = ctx
-        self.client = httpx.Client(timeout=config.NET_STALL_TIMEOUT, headers={"User-Agent": "FileGuard/0.1"}, follow_redirects=True)
+        self.client = httpx.Client(timeout=config.NET_STALL_TIMEOUT, headers={"User-Agent": USER_AGENT}, follow_redirects=True)
         self._pack = {}
 
     # ---------- registry access ----------

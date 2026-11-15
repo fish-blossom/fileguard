@@ -512,7 +512,7 @@ def baseline_put(eco, name, version, sha, profile, scan_id, created_at=None, sou
 
 # --------------------------------------------------------------------------- confirmations
 
-def add_confirmation(scan_id, sha, missing, who, statement, created_at=None, cid=None):
+def add_confirmation(scan_id, sha, missing, who, statement, created_at=None, cid=None, rules_version=None):
     cid = str(cid) if cid is not None else time.strftime("%Y%m%d%H%M%S") + "_" + uuid.uuid4().hex[:8]
     rec = {
         "id": cid,
@@ -522,6 +522,7 @@ def add_confirmation(scan_id, sha, missing, who, statement, created_at=None, cid
         "missing_checks": list(missing or []),
         "confirmed_by": who,
         "statement": statement or "",
+        "rules_version": rules_version,
         "created_at": created_at or time.time(),
     }
     path = config.DATA_DIR / "confirmations" / _safe(sha) / f"{_safe(cid)}.json"

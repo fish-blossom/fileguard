@@ -64,6 +64,8 @@ def build_report(ctx, verdict, error, reused, elapsed):
         "risk_level": verdict["risk_level"],
         "coverage": {s: ctx.stages[s] for s in STAGES},
         "tools": {"engine": f"FileGuard {ENGINE_VERSION}", "clamav": ctx.tools.get("clamav", "N/A"),
+                  "clamav_db_updated": ctx.tools.get("clamav_db", "N/A"),
+                  "unpacker": ctx.tools.get("unpacker", "N/A"),
                   "yara": ctx.tools.get("yara", scanners.yara_version()), "rules_version": scanners.rules_version(),
                   "dependency_intel": "local known-malicious list + OSV.dev" if config.OSV_ENABLED else "local list"},
         "evidence": findings,

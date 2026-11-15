@@ -82,9 +82,34 @@ def _spawn_worker(scan_id):
     return proc.pid
 
 
+def _maybe_refresh_signatures():
+    """Kick off a detached ClamAV signature refresh when the DB check is older than 24 h.
+    Never blocks the scan; clamd reloads the new DB by itself."""
+    if os.environ.get("FILEGUARD_NO_AUTO_DB_UPDATE") == "1":
+        return
+    script = Path(config.BASE_DIR) / "scripts" / "update_clamav_db.sh"
+    stamp = Path(config.DATA_DIR) / "clamav_db_checked"
+    try:
+        if not script.is_file() or (stamp.exists() and time.time() - stamp.stat().st_mtime < 86400):
+            return
+        if not (Path(config.BASE_DIR) / "vendor" / "clamav").is_dir():
+            return
+        lock = Path(config.DATA_DIR) / ".db_refresh_started"
+        if lock.exists() and time.time() - lock.stat().st_mtime < 3600:
+            return
+        lock.touch()
+        env = os.environ.copy()
+        env["FILEGUARD_DATA"] = str(config.DATA_DIR)
+        subprocess.Popen(["bash", str(script), "--if-older-than", "24"], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, start_new_session=True, env=env)
+    except Exception:
+        pass
+
+
 def submit(source, lang="zh", expected_sha256=None, force_rescan=False):
     """No overall timeout: the scan runs to completion in a detached process."""
     _init()
+    _maybe_refresh_signatures()
     from . import estimate as est_mod
     try:
         feats = est_mod.features(source)
@@ -173,11 +198,13 @@ def wait(scan_id, seconds=None):
         time.sleep(0.5)
 
 
-def _confirmations(scan_id, sha):
+def _confirmations(scan_id, sha, rules_at_scan=None):
     out = []
     for c in store.confirmations_for(scan_id):
         c = dict(c)
         c["valid"] = c.get("sha256") == sha
+        # bound to the rule version the user saw; legacy records (no rules_version) follow the report's
+        c["rules_ok"] = (c.get("rules_version") or rules_at_scan) == scanners.rules_version()
         try:
             c["created_at_str"] = datetime.fromtimestamp(c["created_at"]).astimezone().isoformat(timespec="seconds")
         except Exception:
@@ -219,7 +246,8 @@ def get_report(scan_id, lang=None, fmt="markdown"):
         return {"scan_id": scan_id, "status": "error", "verdict": "ERROR", "progress": s.get("progress"),
                 "message": ("检测异常终止，结论为 ERROR，禁止放行。" if lang == "zh" else "Scan aborted; verdict ERROR; do not allow.")}
     rep = json.loads(s["report_json"])
-    confs = [c for c in _confirmations(scan_id, rep.get("sha256")) if c["valid"] and c.get("rules_ok", True)]
+    confs = [c for c in _confirmations(scan_id, rep.get("sha256"), (rep.get("tools") or {}).get("rules_version"))
+             if c["valid"] and c.get("rules_ok", True)]
     if rep.get("tools", {}).get("rules_version") != scanners.rules_version():
         rep["stale"] = {"zh": "规则库已更新，此前的结论与确认需要重新评估（建议重新扫描）",
                         "en": "Rules changed since this scan; prior verdict/confirmations should be re-evaluated (rescan advised)"}
@@ -265,7 +293,11 @@ def confirm_incomplete(scan_id, sha256, missing_checks, confirmed_by, statement=
                 "message": "确认必须逐项列出全部缺失检查项 / confirmation must list exactly all missing checks"}
     if not confirmed_by:
         return {"ok": False, "error": "CONFIRMER_REQUIRED", "message": "需要确认人 / confirmed_by required"}
-    cid = store.add_confirmation(scan_id, rep["sha256"], expected, confirmed_by, statement)
+    rv = (rep.get("tools") or {}).get("rules_version")
+    if rv and rv != scanners.rules_version():
+        return {"ok": False, "error": "RULES_CHANGED",
+                "message": "规则库在这次扫描之后已更新，请重新扫描后再确认 / rules changed since this scan; rescan before confirming"}
+    cid = store.add_confirmation(scan_id, rep["sha256"], expected, confirmed_by, statement, rules_version=scanners.rules_version())
     return {"ok": True, "confirmation_id": cid, "scan_id": scan_id, "sha256": rep["sha256"], "verdict": "INCOMPLETE",
             "disposition": "user_accepted_risk", "missing_checks": expected,
             "message": "已记录用户确认；结论仍为 INCOMPLETE，若文件 SHA-256 改变或规则更新，确认自动失效。"

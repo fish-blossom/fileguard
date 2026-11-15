@@ -1,67 +1,50 @@
 #!/usr/bin/env bash
-# Build the FileGuard engine release tarball (no .venv, no data, no 500 MB test fixture).
-# Usage: scripts/build_release.sh [output-dir]
-# Default output: $ROOT/dist/fileguard.tar.gz  and fileguard-<version>.tar.gz
+# Build a reproducible FileGuard release from a clean git checkout and (optionally) sign it.
+#   scripts/build_release.sh [out-dir]
+#   FILEGUARD_SIGNING_KEY=~/.config/fileguard-release/release_ed25519 scripts/build_release.sh dist
+# Outputs: fileguard.tar.gz (top dir fileguard/), fileguard.tar.gz.sha256, manifest.json,
+#          manifest.json.sig (ssh-keygen -Y sign, namespace fileguard-release) when a key is given.
+# The tarball is built from `git archive` of HEAD's backend/ so it contains exactly the committed
+# files (no venv, data, tests or caches); file times are pinned to the commit time.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT_DIR="${1:-$ROOT/dist}"
-VER="$(head -n1 "$ROOT/VERSION" | tr -d ' \t\r')"
-VER="${VER:-0.0.0}"
-mkdir -p "$OUT_DIR"
-STAGE="$(mktemp -d /tmp/fileguard-rel.XXXXXX)"
-trap 'rm -rf "$STAGE"' EXIT
-
-DEST="$STAGE/fileguard"
-mkdir -p "$DEST"
-
-# Copy a clean engine tree.
-python3 - "$ROOT" "$DEST" << 'PY'
-import os, shutil, sys
-src, dest = sys.argv[1], sys.argv[2]
-skip_top = {".venv", "data", "run", "__pycache__", ".git"}
-for name in os.listdir(src):
-    if name in skip_top:
-        continue
-    s = os.path.join(src, name)
-    d = os.path.join(dest, name)
-    if os.path.isdir(s):
-        def ignore(dirpath, names):
-            out = []
-            rel = os.path.relpath(dirpath, s)
-            for n in names:
-                if n in {"__pycache__", ".git", ".venv", "data", "run"}:
-                    out.append(n)
-                elif n.endswith((".pyc", ".pid", ".sock")) or n == "too_big.bin":
-                    out.append(n)
-                elif rel.replace("\\", "/") == "out" and os.path.basename(s) == "tests":
-                    out.append(n)
-            return out
-        shutil.copytree(s, d, ignore=ignore, dirs_exist_ok=True)
-    else:
-        if name.endswith((".pyc", ".zip")):
-            continue
-        shutil.copy2(s, d)
-
-# Ensure tests/out is not present; drop stale MCP leftovers if any slipped in.
-for rel in (
-    "fileguard/mcp_server.py", "fileguard/db.py",
-    "scripts/run_mcp_http.sh", "scripts/run_mcp_stdio.sh", "scripts/fg_client.py",
-    "tests/out", "tests/samples/too_big.bin",
-):
-    p = os.path.join(dest, rel)
-    if os.path.isdir(p):
-        shutil.rmtree(p, ignore_errors=True)
-    elif os.path.isfile(p):
-        os.remove(p)
+REPO_ROOT="$(git -C "$ROOT" rev-parse --show-toplevel)"
+OUT="$(realpath -m "${1:-$ROOT/dist}")"
+REPO="${FILEGUARD_REPO:-fish-blossom/fileguard}"
+mkdir -p "$OUT"
+if [ -n "$(git -C "$REPO_ROOT" status --porcelain -- backend)" ]; then
+  echo "backend/ has uncommitted changes; commit first" >&2; exit 1
+fi
+VER="$(git -C "$REPO_ROOT" show HEAD:backend/VERSION | head -n1 | tr -d ' \t\r')"
+COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+EPOCH="$(git -C "$REPO_ROOT" log -1 --format=%ct HEAD)"
+STAGE="$(mktemp -d /tmp/fileguard-rel.XXXXXX)"; trap 'rm -rf "$STAGE"' EXIT
+git -C "$REPO_ROOT" archive --format=tar --prefix=fileguard/ HEAD:backend | tar -x -C "$STAGE"
+cp "$REPO_ROOT/LICENSE" "$STAGE/fileguard/LICENSE" 2>/dev/null || true
+tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner --mode='u+rwX,go+rX,go-w' \
+    -C "$STAGE" -cf - fileguard | gzip -9n > "$OUT/fileguard.tar.gz"
+SHA="$(sha256sum "$OUT/fileguard.tar.gz" | awk '{print $1}')"
+echo "$SHA  fileguard.tar.gz" > "$OUT/fileguard.tar.gz.sha256"
+python3 - "$OUT/manifest.json" "$VER" "$COMMIT" "$SHA" "$(stat -c %s "$OUT/fileguard.tar.gz")" "$REPO" "$EPOCH" << 'PY'
+import json, sys, time
+out, ver, commit, sha, size, repo, epoch = sys.argv[1:]
+json.dump({
+    "name": "fileguard",
+    "version": ver,
+    "tag": f"v{ver}",
+    "commit": commit,
+    "tarball": "fileguard.tar.gz",
+    "tarball_url": f"https://github.com/{repo}/releases/download/v{ver}/fileguard.tar.gz",
+    "sha256": sha,
+    "size": int(size),
+    "source_date": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(epoch))),
+}, open(out, "w"), indent=2)
+open(out, "a").write("\n")
 PY
-
-chmod +x "$DEST/install.sh" "$DEST/scripts/fg" "$DEST/scripts/start_clamd.sh" "$DEST/scripts/build_release.sh" "$DEST/bin/fg" 2>/dev/null || true
-
-TAR="$OUT_DIR/fileguard-${VER}.tar.gz"
-TAR_LATEST="$OUT_DIR/fileguard.tar.gz"
-tar -czf "$TAR" -C "$STAGE" fileguard
-cp -f "$TAR" "$TAR_LATEST"
-# a sibling VERSION file so getting-started can check latest without unpacking
-cp -f "$ROOT/VERSION" "$OUT_DIR/fileguard-VERSION"
-ls -lh "$TAR" "$TAR_LATEST"
-echo "built $TAR"
+if [ -n "${FILEGUARD_SIGNING_KEY:-}" ]; then
+  rm -f "$OUT/manifest.json.sig"
+  ssh-keygen -Y sign -f "$FILEGUARD_SIGNING_KEY" -n fileguard-release "$OUT/manifest.json" >/dev/null
+  ssh-keygen -Y verify -f "$ROOT/release-signers" -I fileguard-release@fish-blossom -n fileguard-release \
+    -s "$OUT/manifest.json.sig" < "$OUT/manifest.json"
+fi
+ls -l "$OUT"

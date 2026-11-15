@@ -100,8 +100,7 @@ def checksum_sidecars(ctx, final_url, sha256, fname):
     for u in cands:
         try:
             host = urllib.parse.urlsplit(u).hostname
-            netutil.check_host(host)
-            r = httpx.get(u, timeout=8, follow_redirects=False, headers={"User-Agent": netutil.USER_AGENT})
+            r = netutil.safe_get(u, timeout=8, max_bytes=1_000_000)
             if r.status_code != 200 or len(r.content) > 1_000_000:
                 continue
             txt = r.text

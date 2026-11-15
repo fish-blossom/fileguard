@@ -1,9 +1,9 @@
 # FileGuard dedicated clamd (runs as the current user, local Unix socket).
-# @FILEGUARD_DIR@ is replaced by start_clamd.sh / install.sh.
+# @FILEGUARD_DIR@ / @CLAMAV_DB@ are filled in by scripts/start_clamd.sh.
 LocalSocket @FILEGUARD_DIR@/run/clamd.sock
 LocalSocketMode 660
 PidFile @FILEGUARD_DIR@/run/clamd.pid
-DatabaseDirectory /var/lib/clamav
+DatabaseDirectory @CLAMAV_DB@
 LogFile @FILEGUARD_DIR@/run/clamd.log
 LogTime yes
 Foreground no
@@ -25,4 +25,4 @@ ScanHTML yes
 AlertEncrypted no
 AlertOLE2Macros no
 HeuristicAlerts yes
-AlertExceedsMax no
+AlertExceedsMax yes
