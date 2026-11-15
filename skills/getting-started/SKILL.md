@@ -16,8 +16,9 @@ description: First conversation with a new owner of the FileGuard bot.
 D=/workspace/fileguard; BOOT=""
 if [ -f "$D/bootstrap.sh" ]; then BOOT="$D/bootstrap.sh"; else
   T=$(mktemp -d /tmp/fileguard-src.XXXXXX); B=https://github.com/fish-blossom/fileguard/releases/latest/download
-  curl -fsSL "$B/fileguard.tar.gz" -o "$T/fileguard.tar.gz" && curl -fsSL "$B/manifest.json" -o "$T/manifest.json" \
-  && curl -fsSL "$B/manifest.json.sig" -o "$T/manifest.json.sig" \
+  curl -fsSL "$B/manifest.json" -o "$T/manifest.json" && curl -fsSL "$B/manifest.json.sig" -o "$T/manifest.json.sig" \
+  && U=$(python3 -c 'import json,sys; u=json.load(open(sys.argv[1]))["tarball_url"]; assert u.startswith("https://github.com/fish-blossom/fileguard/releases/download/"); print(u)' "$T/manifest.json") \
+  && curl -fsSL "$U" -o "$T/fileguard.tar.gz" \
   && python3 -c 'import hashlib,json,sys; m=json.load(open(sys.argv[1])); sys.exit(hashlib.sha256(open(sys.argv[2],"rb").read()).hexdigest()!=m["sha256"])' "$T/manifest.json" "$T/fileguard.tar.gz" \
   && tar -xzf "$T/fileguard.tar.gz" -C "$T" \
   && K="$D/data/trust/release-signers" && { [ -s "$K" ] || K="$D/release-signers"; [ -s "$K" ] || K="$T/fileguard/release-signers"; } \
