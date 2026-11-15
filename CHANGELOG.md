@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.9 (2026-11-15)
 
 - **First install no longer leaves `/tmp/fileguard-src.*` behind.** When `bootstrap.sh` runs from the getting-started download dir (`/tmp/fileguard-src.XXXXXX/fileguard/bootstrap.sh`, checked with `realpath`) and the install ends usable, it silently removes that dir. Any other location is left alone.
 - **clamd no longer keeps running from an old `.prev-*` tree.** An update moves the old tree (including `vendor/`) to `.prev-<ts>`, so a running clamd's binary ends up there, and is deleted by the next install. `start_clamd.sh` only compared versions, so after a same-version ClamAV update clamd was never restarted. It now also restarts this install's clamd when its binary is not the current `vendor/clamav/sbin/clamd` (graceful SIGTERM, SIGKILL only after 30 s). Only a clamd verified as this install's own is ever stopped: its pid is the one in `run/clamd.pid` AND its binary is this install's vendor clamd (current tree, `.prev-<ts>`, or deleted). The install-lock self-heal in `install.sh` and `bootstrap.sh` uses the same check, so it no longer treats a clamd from outside the install dir as its own.
