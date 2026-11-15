@@ -17,6 +17,8 @@
 #      or logged out; signature + SHA-256 are always mandatory).
 #   4. run the NEW release's install.sh --from-tree --verified (staged swap, self-check,
 #      rollback to the old version on failure). No curl|bash: everything is a verified file.
+#   5. if this script was run from the getting-started download dir /tmp/fileguard-src.XXXXXX
+#      and the install is usable, remove that dir (silently).
 # Prints ONE JSON object on stdout (same shape as install.sh); progress goes to stderr.
 set -uo pipefail
 umask 022
@@ -92,6 +94,16 @@ emit() {  # action ok
   local u=0; usable && u=1
   python3 -c 'import json,sys; a,v,d,dd,ok,u=sys.argv[1:]; print(json.dumps({"action":a,"version":v,"dir":d,"data_dir":dd,"ok":ok=="1","usable":u=="1","rolled_back":False,"missing_components":[]}))' \
     "$1" "$(installed_version)" "$DIR" "$DATA" "$2" "$u"
+}
+cleanup_src() {  # remove the getting-started download dir /tmp/fileguard-src.XXXXXX this script runs from
+  # Only when this bootstrap.sh is <that dir>/fileguard/bootstrap.sh (checked via realpath) and the dir
+  # is a real directory owned by us; anything else is left alone. Always silent.
+  local src
+  src="$(realpath -e "$SELF_DIR/.." 2>/dev/null)" || return 0
+  [[ "$src" =~ ^/tmp/fileguard-src\.[A-Za-z0-9]{6}$ ]] || return 0
+  [ "$(realpath -e "$SELF_DIR" 2>/dev/null)" = "$src/fileguard" ] || return 0
+  [ -d "$src" ] && [ ! -L "$src" ] && [ -O "$src" ] || return 0
+  rm -rf -- "$src" >/dev/null 2>&1 || true
 }
 finish_fail() {  # keep the old version; non-zero only when the engine is not usable
   emit "$1" 0; usable && return 0 || return 1
@@ -192,6 +204,9 @@ rc=$?
 state latest_seen="$NEW" last_result="$([ $rc -eq 0 ] && echo installed || echo failed)"
 restart_clamd_if_needed
 cat "$TMP/inner.json"
+if [ $rc -eq 0 ] && python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("usable") is True else 1)' "$TMP/inner.json" 2>/dev/null; then
+  cleanup_src
+fi
 return $rc
 }
 main "$@"; exit $?
